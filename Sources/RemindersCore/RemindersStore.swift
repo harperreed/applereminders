@@ -51,7 +51,8 @@ public actor RemindersStore {
             throw RemindersError.accessDenied
 
         case .notDetermined:
-            let granted = try await eventStore.requestFullAccessToReminders()
+            let store = UncheckedTransfer(value: eventStore)
+            let granted = try await store.value.requestFullAccessToReminders()
             guard granted else {
                 throw RemindersError.accessDenied
             }
@@ -419,9 +420,10 @@ public actor RemindersStore {
     /// The `UncheckedTransfer` wrapper is needed because `EKReminder` is not `Sendable`,
     /// but the actor boundary guarantees exclusive access after the continuation resumes.
     private func fetchReminders(on calendars: [EKCalendar]?) async throws -> [EKReminder] {
-        let predicate = eventStore.predicateForReminders(in: calendars)
+        let store = UncheckedTransfer(value: eventStore)
+        let predicate = store.value.predicateForReminders(in: calendars)
         let transfer = await withCheckedContinuation { (continuation: CheckedContinuation<UncheckedTransfer<[EKReminder]>, Never>) in
-            eventStore.fetchReminders(matching: predicate) { reminders in
+            store.value.fetchReminders(matching: predicate) { reminders in
                 continuation.resume(returning: UncheckedTransfer(value: reminders ?? []))
             }
         }
