@@ -26,7 +26,18 @@ let package = Package(
                 "RemindersCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/RemindersCLI"
+            path: "Sources/RemindersCLI",
+            exclude: [
+                "Resources/Info.plist",
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/RemindersCLI/Resources/Info.plist",
+                ]),
+            ]
         ),
         .testTarget(
             name: "RemindersCoreTests",
