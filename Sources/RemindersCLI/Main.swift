@@ -22,4 +22,18 @@ struct RemindersTool: AsyncParsableCommand {
             NewListCommand.self,
         ]
     )
+
+    @Flag(help: "Run as MCP server over stdio")
+    var mcp = false
+
+    func run() async throws {
+        if mcp {
+            let store = try await makeStore()
+            let server = MCPServer(store: store)
+            await server.run()
+        } else {
+            // No subcommand and no --mcp flag: print help.
+            throw CleanExit.helpRequest(self)
+        }
+    }
 }
