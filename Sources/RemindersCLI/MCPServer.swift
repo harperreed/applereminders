@@ -44,8 +44,6 @@ actor MCPServer {
     private let registry: ToolRegistry
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
-    private let prettyEncoder: JSONEncoder
-
     init(store: RemindersStore) {
         self.store = store
         self.decoder = JSONDecoder()
@@ -54,43 +52,41 @@ actor MCPServer {
         self.encoder = JSONEncoder()
         self.encoder.outputFormatting = [.sortedKeys]
 
-        // Pretty encoder for tool result payloads (human-readable data inside text content).
-        self.prettyEncoder = JSONEncoder()
-        self.prettyEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        self.prettyEncoder.dateEncodingStrategy = .iso8601
-
         self.registry = MCPServer.buildRegistry(store: store)
     }
 
     // MARK: - Main Loop
 
     /// Runs the server, reading lines from stdin until EOF.
+    ///
+    /// Uses `FileHandle.standardInput.bytes.lines` to avoid blocking the
+    /// cooperative thread pool (unlike `readLine()` which is synchronous).
     func run() async {
         logStderr("reminders-mcp server starting")
 
-        while let line = readLine(strippingNewline: true) {
-            guard !line.isEmpty else { continue }
+        do {
+            for try await line in FileHandle.standardInput.bytes.lines {
+                guard !line.isEmpty else { continue }
 
-            logStderr("recv: \(line)")
+                logStderr("recv: \(line)")
 
-            guard let data = line.data(using: .utf8) else {
-                logStderr("Failed to convert input line to UTF-8 data")
-                continue
+                let data = Data(line.utf8)
+
+                do {
+                    let request = try decoder.decode(JSONRPCRequest.self, from: data)
+                    await handleRequest(request)
+                } catch {
+                    logStderr("JSON parse error: \(error)")
+                    let response = makeErrorResponse(
+                        id: nil,
+                        code: -32700,
+                        message: "Parse error: \(error.localizedDescription)"
+                    )
+                    writeLine(response)
+                }
             }
-
-            do {
-                let request = try decoder.decode(JSONRPCRequest.self, from: data)
-                await handleRequest(request)
-            } catch {
-                logStderr("JSON parse error: \(error)")
-                // Malformed JSON-RPC: send a parse error with null id.
-                let response = makeErrorResponse(
-                    id: nil,
-                    code: -32700,
-                    message: "Parse error: \(error.localizedDescription)"
-                )
-                writeLine(response)
-            }
+        } catch {
+            logStderr("stdin read error: \(error.localizedDescription)")
         }
 
         logStderr("reminders-mcp server shutting down (stdin closed)")
@@ -730,7 +726,12 @@ actor MCPServer {
         }
 
         do {
-            let updated = try await store.setComplete(false, itemAtIndex: index, onList: listName)
+            let updated = try await store.setComplete(
+                false,
+                itemAtIndex: index,
+                onList: listName,
+                onlyCompleted: true
+            )
             let text = prettyEncodeJSON(updated)
             return .success(text)
         } catch {
@@ -832,21 +833,12 @@ actor MCPServer {
 
 // MARK: - MCPToolError
 
-/// Errors specific to MCP tool dispatch and argument handling.
+/// Errors specific to MCP server internals.
 enum MCPToolError: LocalizedError, Sendable {
-    case unknownTool(String)
-    case missingRequiredParam(String)
-    case invalidParam(String, String)
     case encodingFailed
 
     var errorDescription: String? {
         switch self {
-        case .unknownTool(let name):
-            return "Unknown tool: \(name)"
-        case .missingRequiredParam(let param):
-            return "Missing required parameter: \(param)"
-        case .invalidParam(let param, let reason):
-            return "Invalid parameter \"\(param)\": \(reason)"
         case .encodingFailed:
             return "Failed to encode response"
         }

@@ -80,7 +80,9 @@ func filterByDueDate(
 
     let calendar = Calendar.current
     let startOfToday = calendar.startOfDay(for: Date())
-    let endOfTargetDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: targetDate))!
+    guard let endOfTargetDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: targetDate)) else {
+        return reminders
+    }
 
     return reminders.filter { reminder in
         guard let reminderDue = reminder.dueDate else {

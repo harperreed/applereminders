@@ -192,15 +192,23 @@ public actor RemindersStore {
     ///   - complete: `true` to mark complete, `false` to mark incomplete.
     ///   - itemAtIndex: An integer index (as a string) or an external identifier.
     ///   - listName: The name of the list containing the reminder.
+    ///   - includeCompleted: Whether to include completed reminders when resolving the index.
+    ///   - onlyCompleted: If `true`, only completed reminders are considered when resolving the index.
     /// - Returns: The updated `ReminderItem`.
     public func setComplete(
         _ complete: Bool,
         itemAtIndex: String,
-        onList listName: String
+        onList listName: String,
+        includeCompleted: Bool = false,
+        onlyCompleted: Bool = false
     ) async throws -> ReminderItem {
         let targetCalendar = try resolveCalendar(named: listName)
-        let allReminders = try await fetchReminders(on: [targetCalendar])
-        let (ekReminder, _) = try resolveReminder(from: allReminders, at: itemAtIndex)
+        let filtered = try await fetchFilteredEKReminders(
+            on: [targetCalendar],
+            includeCompleted: includeCompleted,
+            onlyCompleted: onlyCompleted
+        )
+        let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
 
         ekReminder.isCompleted = complete
         if complete {
@@ -229,16 +237,24 @@ public actor RemindersStore {
     ///   - listName: The name of the list containing the reminder.
     ///   - newText: A new title, or `nil` to leave unchanged.
     ///   - newNotes: New notes, or `nil` to leave unchanged.
+    ///   - includeCompleted: Whether to include completed reminders when resolving the index.
+    ///   - onlyCompleted: If `true`, only completed reminders are considered when resolving the index.
     /// - Returns: The updated `ReminderItem`.
     public func edit(
         itemAtIndex: String,
         onList listName: String,
         newText: String? = nil,
-        newNotes: String? = nil
+        newNotes: String? = nil,
+        includeCompleted: Bool = false,
+        onlyCompleted: Bool = false
     ) async throws -> ReminderItem {
         let targetCalendar = try resolveCalendar(named: listName)
-        let allReminders = try await fetchReminders(on: [targetCalendar])
-        let (ekReminder, _) = try resolveReminder(from: allReminders, at: itemAtIndex)
+        let filtered = try await fetchFilteredEKReminders(
+            on: [targetCalendar],
+            includeCompleted: includeCompleted,
+            onlyCompleted: onlyCompleted
+        )
+        let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
 
         if let newText {
             ekReminder.title = newText
@@ -265,14 +281,22 @@ public actor RemindersStore {
     /// - Parameters:
     ///   - itemAtIndex: An integer index (as a string) or an external identifier.
     ///   - listName: The name of the list containing the reminder.
+    ///   - includeCompleted: Whether to include completed reminders when resolving the index.
+    ///   - onlyCompleted: If `true`, only completed reminders are considered when resolving the index.
     /// - Returns: The title of the deleted reminder.
     public func delete(
         itemAtIndex: String,
-        onList listName: String
+        onList listName: String,
+        includeCompleted: Bool = false,
+        onlyCompleted: Bool = false
     ) async throws -> String {
         let targetCalendar = try resolveCalendar(named: listName)
-        let allReminders = try await fetchReminders(on: [targetCalendar])
-        let (ekReminder, _) = try resolveReminder(from: allReminders, at: itemAtIndex)
+        let filtered = try await fetchFilteredEKReminders(
+            on: [targetCalendar],
+            includeCompleted: includeCompleted,
+            onlyCompleted: onlyCompleted
+        )
+        let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
 
         let deletedTitle = ekReminder.title ?? "(untitled)"
 
@@ -404,21 +428,42 @@ public actor RemindersStore {
         return transfer.value
     }
 
+    /// Fetches EKReminder objects filtered by completion status.
+    ///
+    /// Unlike `filteredReminders(on:displayOptions:)`, this returns raw `EKReminder` objects
+    /// so callers can mutate them (e.g., mark complete, edit, delete).
+    ///
+    /// - Parameters:
+    ///   - calendars: The calendars to fetch from, or `nil` for all.
+    ///   - includeCompleted: Whether to include completed reminders. Ignored when `onlyCompleted` is true.
+    ///   - onlyCompleted: If `true`, returns only completed reminders.
+    /// - Returns: An array of `EKReminder` matching the filter criteria.
+    private func fetchFilteredEKReminders(
+        on calendars: [EKCalendar]?,
+        includeCompleted: Bool,
+        onlyCompleted: Bool
+    ) async throws -> [EKReminder] {
+        let allReminders = try await fetchReminders(on: calendars)
+
+        if onlyCompleted {
+            return allReminders.filter(\.isCompleted)
+        } else if !includeCompleted {
+            return allReminders.filter { !$0.isCompleted }
+        } else {
+            return allReminders
+        }
+    }
+
     /// Fetches reminders and filters them by the given display options.
     private func filteredReminders(
         on calendars: [EKCalendar]?,
         displayOptions: DisplayOptions
     ) async throws -> [ReminderItem] {
-        let allReminders = try await fetchReminders(on: calendars)
-
-        let filtered: [EKReminder]
-        if displayOptions.onlyCompleted {
-            filtered = allReminders.filter(\.isCompleted)
-        } else if !displayOptions.includeCompleted {
-            filtered = allReminders.filter { !$0.isCompleted }
-        } else {
-            filtered = allReminders
-        }
+        let filtered = try await fetchFilteredEKReminders(
+            on: calendars,
+            includeCompleted: displayOptions.includeCompleted,
+            onlyCompleted: displayOptions.onlyCompleted
+        )
 
         return filtered.map { mapReminder($0) }
     }

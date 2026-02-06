@@ -23,7 +23,8 @@ struct UncompleteCommand: AsyncParsableCommand {
             let updated = try await store.setComplete(
                 false,
                 itemAtIndex: index,
-                onList: listName
+                onList: listName,
+                onlyCompleted: true
             )
             print("Uncompleted: \(updated.title)")
         }
