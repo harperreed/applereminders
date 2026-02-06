@@ -43,6 +43,10 @@ let package = Package(
             name: "RemindersCoreTests",
             dependencies: ["RemindersCore"]
         ),
+        .testTarget(
+            name: "RemindersCLITests",
+            dependencies: ["reminders"]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

@@ -1,0 +1,46 @@
+# ABOUTME: GitHub Actions workflow that creates a release when a tag is pushed.
+# ABOUTME: Builds a universal macOS binary and attaches it to the GitHub release.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal release binary
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+
+      - name: Run tests
+        run: swift test
+
+      - name: Prepare release artifact
+        run: |
+          mkdir -p release
+          cp .build/apple/Products/Release/reminders release/
+          cd release && tar czf reminders-macos-universal.tar.gz reminders
+          shasum -a 256 reminders-macos-universal.tar.gz > checksums.txt
+
+      - name: Extract tag name
+        id: tag
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.tag.outputs.version }}
+          generate_release_notes: true
+          files: |
+            release/reminders-macos-universal.tar.gz
+            release/checksums.txt
