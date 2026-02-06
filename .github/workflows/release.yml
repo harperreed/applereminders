@@ -1,5 +1,5 @@
 # ABOUTME: GitHub Actions workflow that creates a release when a tag is pushed.
-# ABOUTME: Builds a universal macOS binary and attaches it to the GitHub release.
+# ABOUTME: Builds a universal macOS binary, creates a GitHub release, and updates the Homebrew tap.
 
 name: Release
 
@@ -32,15 +32,62 @@ jobs:
           cd release && tar czf reminders-macos-universal.tar.gz reminders
           shasum -a 256 reminders-macos-universal.tar.gz > checksums.txt
 
-      - name: Extract tag name
+      - name: Extract tag and version
         id: tag
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ steps.tag.outputs.version }}
+          name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: |
             release/reminders-macos-universal.tar.gz
             release/checksums.txt
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          SHA256=$(shasum -a 256 release/reminders-macos-universal.tar.gz | awk '{print $1}')
+          URL="https://github.com/harperreed/applereminders/releases/download/${TAG}/reminders-macos-universal.tar.gz"
+
+          FORMULA=$(cat <<RUBY
+          # typed: false
+          # frozen_string_literal: true
+
+          class Applereminders < Formula
+            desc "Drop-in replacement for reminders-cli using EventKit with async/await"
+            homepage "https://github.com/harperreed/applereminders"
+            version "${VERSION}"
+            license "MIT"
+            depends_on :macos
+
+            url "${URL}"
+            sha256 "${SHA256}"
+
+            def install
+              bin.install "reminders"
+            end
+
+            test do
+              system "#{bin}/reminders", "--help"
+            end
+          end
+          RUBY
+          )
+
+          # Clone the tap repo and push the updated formula
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/harperreed/homebrew-tap.git" /tmp/homebrew-tap
+          echo "${FORMULA}" > /tmp/homebrew-tap/Formula/applereminders.rb
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/applereminders.rb
+          git commit -m "Update applereminders to ${VERSION}"
+          git push
