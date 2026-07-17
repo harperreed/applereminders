@@ -22,6 +22,7 @@ struct RemindersTool: AsyncParsableCommand {
             EditCommand.self,
             NewListCommand.self,
             ServeCommand.self,
+            AgentCommand.self,
         ]
     )
 
