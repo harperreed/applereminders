@@ -166,10 +166,89 @@ make test     # test suite only
 bash scripts/mcp-freshness-smoke.sh   # e2e freshness check (needs TCC grant)
 ```
 
-The package has two targets: `RemindersCore`, an actor that wraps
-`EKEventStore`, and the `reminders` executable, which holds the
-swift-argument-parser CLI and the MCP server. Notes for coding agents live in
-[CLAUDE.md](CLAUDE.md).
+The package separates EventKit domain logic (`RemindersCore`), MCP and HTTP
+serving (`RemindersServer`), the swift-argument-parser executable
+(`reminders`), and the shared in-memory test fake (`RemindersTestSupport`).
+Notes for coding agents live in [CLAUDE.md](CLAUDE.md).
+
+## Network server
+
+`reminders serve` runs an HTTP server that exposes the same reminder tools over
+the network. Two surfaces share one listener and one bearer token:
+
+- `POST /mcp`: MCP over Streamable HTTP (stateless: no sessions, no SSE)
+- `/api/*`: a JSON REST API
+
+### Setup
+
+```bash
+# one time: create the bearer token (printed once, stored with mode 600)
+reminders serve --generate-token
+
+# run in the foreground
+reminders serve
+
+# or keep it running via launchd (runs at login, restarts on crashes)
+reminders agent install
+reminders agent status
+reminders agent uninstall
+```
+
+The server binds the Mac's tailscale interface by default and refuses to start
+without one. `--bind` overrides the interface, `--port` overrides the default
+7364, and `--token-file` overrides the token path
+(`~/.config/reminders-mcp/token`).
+
+### Connect an MCP client
+
+```bash
+claude mcp add --transport http reminders \
+  "http://<tailscale-ip>:7364/mcp" \
+  --header "Authorization: Bearer <token>"
+```
+
+### REST API
+
+Every request needs `Authorization: Bearer <token>`. Errors: 401 with an empty
+body; 400, 404, and 500 with `{"error": "message"}`.
+
+| Method and path | Body / query | Returns |
+| --- | --- | --- |
+| GET /api/lists | | all lists |
+| GET /api/reminders | query: `list`, `completed` (false, all, only), `due_before`, `due_after` | reminders (default: incomplete, all lists) |
+| POST /api/reminders | `{list, title, notes?, due_date?, priority?}` | 201 + the new reminder |
+| PATCH /api/reminders/{id} | any of `{title, notes, due_date, priority, list}`; `"due_date": null` clears it | the updated reminder |
+| POST /api/reminders/{id}/complete | | the completed reminder |
+| POST /api/reminders/{id}/uncomplete | | the reopened reminder |
+| DELETE /api/reminders/{id} | | the deleted reminder |
+
+Dates accept the CLI formats (`today`, `tomorrow`, `next week`, `2030-01-15`,
+`2030-01-15 09:30`, `01/15/2030`, `01/15`). Priorities: `none`, `low`,
+`medium`, `high`. Reminder ids come from the API's own responses.
+
+### Security model
+
+- No built-in TLS: tailscale (WireGuard) encrypts the transport, and the default
+  listener binds only the tailscale interface. If you override `--bind`, keep
+  the listener on a trusted network or provide TLS in front of it; never expose
+  the plain HTTP port directly to an untrusted network.
+- No Origin checking: DNS rebinding can let a hostile page reach the listener,
+  but the page does not know the bearer token. Cross-origin Authorization
+  headers also require a preflight that this server does not authorize, so the
+  request never reaches a reminder route.
+- Request logs are one line each (method, path, status, duration); bodies and tokens are never logged.
+- launchd caveat: macOS ties Reminders access to the binary's path and
+  signature. Rebuilding or moving the binary can silently re-trigger the
+  permission prompt, which nobody sees under launchd; the server then fails
+  until you run the binary by hand and re-grant access. `reminders agent
+  status` shows the last exit state.
+
+### Smoke test
+
+```bash
+scripts/serve-smoke.sh                       # starts .build/debug/reminders serve itself
+scripts/serve-smoke.sh http://100.x.y.z:7364 # or target a running server
+```
 
 ## Author
 

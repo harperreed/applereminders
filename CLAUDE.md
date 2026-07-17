@@ -39,6 +39,16 @@ Other MCP clients use the equivalent JSON config:
 }
 ```
 
+## Run network server
+
+```bash
+.build/debug/reminders serve --generate-token   # first time: create the bearer token
+.build/debug/reminders serve                    # MCP at /mcp, REST under /api, tailscale interface, port 7364
+.build/debug/reminders agent install            # keep it running via launchd
+```
+
+Live smoke: `scripts/serve-smoke.sh` (TCC-dependent, best effort).
+
 ## Test
 
 ```bash
@@ -49,6 +59,7 @@ swift test
 ## Architecture
 
 - `RemindersCore` - Actor-based EventKit wrapper, no semaphores
-- `RemindersCLI` - swift-argument-parser CLI + MCP server in one binary
+- `RemindersServer` - MCP server (stdio and HTTP transports), Hummingbird REST layer, token file, tailscale discovery, launchd plist
+- `RemindersCLI` - swift-argument-parser CLI; subcommands include `serve` and `agent`
 - `RemindersTestSupport` - shared in-memory fake of the EventKit seam; tests run without TCC
 - Single binary: `reminders`
