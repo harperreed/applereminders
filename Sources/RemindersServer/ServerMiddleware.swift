@@ -41,12 +41,23 @@ struct RequestLogMiddleware<Context: RequestContext>: RouterMiddleware {
     ) async throws -> Response {
         let clock = ContinuousClock()
         let start = clock.now
-        let response = try await next(request, context)
-        let elapsed = start.duration(to: clock.now)
-        let milliseconds = Double(elapsed.components.seconds) * 1000
-            + Double(elapsed.components.attoseconds) / 1e15
-        log("\(request.method) \(request.uri.path) \(response.status.code) \(String(format: "%.1f", milliseconds))ms")
-        return response
+        do {
+            let response = try await next(request, context)
+            let elapsed = start.duration(to: clock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1000
+                + Double(elapsed.components.attoseconds) / 1e15
+            log("\(request.method) \(request.uri.path) \(response.status.code) \(String(format: "%.1f", milliseconds))ms")
+            return response
+        } catch {
+            let elapsed = start.duration(to: clock.now)
+            let milliseconds = Double(elapsed.components.seconds) * 1000
+                + Double(elapsed.components.attoseconds) / 1e15
+            // Use the error's own status if it conforms to HTTPResponseError
+            // (e.g. Hummingbird's HTTPError); otherwise fall back to 500.
+            let statusCode = (error as? any HTTPResponseError)?.status.code ?? 500
+            log("\(request.method) \(request.uri.path) \(statusCode) \(String(format: "%.1f", milliseconds))ms")
+            throw error
+        }
     }
 }
 

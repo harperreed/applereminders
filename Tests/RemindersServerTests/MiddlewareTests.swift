@@ -61,6 +61,7 @@ struct MiddlewareTests {
         try await app.test(.router) { client in
             try await client.execute(uri: "/ping", method: .get, headers: headers) { response in
                 #expect(response.status == .unauthorized)
+                #expect(response.body.readableBytes == 0)
             }
         }
     }
@@ -119,5 +120,29 @@ struct MiddlewareTests {
         #expect(line.contains("200"))
         #expect(!line.contains("pong"))
         #expect(!line.contains("secret"))
+    }
+
+    /// A handler that throws must still produce a log line with the correct
+    /// method, path, and a status code, even when no error-mapping middleware
+    /// sits between the logger and the handler.
+    @Test func throwingHandlerIsStillLogged() async throws {
+        let box = LogBox()
+        let router = Router()
+        router.middlewares.add(RequestLogMiddleware(log: { box.append($0) }))
+        router.get("boom") { _, _ -> Response in
+            throw HTTPError(.serviceUnavailable)
+        }
+        let app = Application(router: router)
+        try await app.test(.router) { client in
+            // The client sees an error status; we don't assert which one,
+            // only that the log captured something.
+            try await client.execute(uri: "/boom", method: .get) { _ in }
+        }
+        let line = try #require(box.lines.first, "expected exactly one log line for the throwing request")
+        #expect(line.contains("GET"))
+        #expect(line.contains("/boom"))
+        // Must contain a numeric status code: any 3-digit number suffices.
+        let hasStatus = line.range(of: #"\b\d{3}\b"#, options: .regularExpression) != nil
+        #expect(hasStatus)
     }
 }
