@@ -1,5 +1,5 @@
-// ABOUTME: MCP server actor that speaks JSON-RPC 2.0 over stdin/stdout.
-// ABOUTME: Maps MCP tool calls to RemindersStore methods and returns structured results.
+// ABOUTME: MCP server actor that handles JSON-RPC 2.0 messages one at a time.
+// ABOUTME: Runs a stdio loop for --mcp mode; HTTP transports call the per-message entry point.
 
 import Foundation
 import RemindersCore
@@ -107,18 +107,7 @@ public actor MCPServer {
 
                 logStderr("recv: \(line)")
 
-                let data = Data(line.utf8)
-
-                do {
-                    let request = try decoder.decode(JSONRPCRequest.self, from: data)
-                    await handleRequest(request)
-                } catch {
-                    logStderr("JSON parse error: \(error)")
-                    let response = makeErrorResponse(
-                        id: nil,
-                        code: -32700,
-                        message: "Parse error: \(error.localizedDescription)"
-                    )
+                if let response = await response(forMessageData: Data(line.utf8)) {
                     writeLine(response)
                 }
             }
@@ -129,43 +118,64 @@ public actor MCPServer {
         logStderr("reminders-mcp server shutting down (stdin closed)")
     }
 
+    // MARK: - Per-Message Entry Point
+
+    /// Handles one raw JSON-RPC message and returns the response line, or `nil`
+    /// when the message requires no response (notifications). HTTP transports
+    /// call this directly; the stdio loop feeds it line by line. Never logs the
+    /// message body: transports own their logging policy.
+    func response(forMessageData data: Data) async -> String? {
+        let request: JSONRPCRequest
+        do {
+            request = try decoder.decode(JSONRPCRequest.self, from: data)
+        } catch {
+            logStderr("JSON parse error: \(error)")
+            return makeErrorResponse(
+                id: nil,
+                code: -32700,
+                message: "Parse error: \(error.localizedDescription)"
+            )
+        }
+        return await response(to: request)
+    }
+
     // MARK: - Request Dispatch
 
-    /// Routes a JSON-RPC request to the appropriate handler based on its method name.
-    private func handleRequest(_ request: JSONRPCRequest) async {
+    /// Routes a JSON-RPC request to its handler and returns the response line,
+    /// or `nil` for notifications.
+    private func response(to request: JSONRPCRequest) async -> String? {
         switch request.method {
         case "initialize":
-            handleInitialize(request)
+            return handleInitialize(request)
         case "notifications/initialized":
             // Notification: no response required.
             logStderr("Client initialized notification received")
+            return nil
         case "ping":
-            handlePing(request)
+            return handlePing(request)
         case "tools/list":
-            handleToolsList(request)
+            return handleToolsList(request)
         case "tools/call":
-            await handleToolsCall(request)
+            return await handleToolsCall(request)
         case "resources/list":
-            handleResourcesList(request)
+            return handleResourcesList(request)
         case "prompts/list":
-            handlePromptsList(request)
+            return handlePromptsList(request)
         default:
             logStderr("Unknown method: \(request.method)")
-            if request.id != nil {
-                let response = makeErrorResponse(
-                    id: request.id,
-                    code: -32601,
-                    message: "Method not found: \(request.method)"
-                )
-                writeLine(response)
-            }
+            guard request.id != nil else { return nil }
+            return makeErrorResponse(
+                id: request.id,
+                code: -32601,
+                message: "Method not found: \(request.method)"
+            )
         }
     }
 
     // MARK: - Protocol Methods
 
     /// Responds to the `initialize` method with server capabilities.
-    private func handleInitialize(_ request: JSONRPCRequest) {
+    private func handleInitialize(_ request: JSONRPCRequest) -> String {
         let result: [String: JSONValue] = [
             "protocolVersion": .string("2024-11-05"),
             "capabilities": .object([
@@ -176,52 +186,45 @@ public actor MCPServer {
                 "version": .string("1.0.0"),
             ]),
         ]
-        let response = makeSuccessResponse(id: request.id, result: .object(result))
-        writeLine(response)
         logStderr("Initialized with protocol version 2024-11-05")
+        return makeSuccessResponse(id: request.id, result: .object(result))
     }
 
     /// Responds to the `ping` method with an empty result.
-    private func handlePing(_ request: JSONRPCRequest) {
-        let response = makeSuccessResponse(id: request.id, result: .object([:]))
-        writeLine(response)
+    private func handlePing(_ request: JSONRPCRequest) -> String {
         logStderr("Responded to ping")
+        return makeSuccessResponse(id: request.id, result: .object([:]))
     }
 
     /// Responds to `tools/list` with the full array of tool definitions.
-    private func handleToolsList(_ request: JSONRPCRequest) {
+    private func handleToolsList(_ request: JSONRPCRequest) -> String {
         let tools = registry.allDefinitions()
-        let line = encodeEnvelope(
+        logStderr("Returned \(tools.count) tool definitions")
+        return encodeEnvelope(
             JSONRPCResponse(id: request.id, result: ToolsListResult(tools: tools)),
             id: request.id
         )
-        writeLine(line)
-        logStderr("Returned \(tools.count) tool definitions")
     }
 
     // MARK: - Tool Call Dispatch
 
     /// Handles `tools/call` by extracting the tool name and arguments, then dispatching
     /// to the registry.
-    private func handleToolsCall(_ request: JSONRPCRequest) async {
+    private func handleToolsCall(_ request: JSONRPCRequest) async -> String {
         guard let params = request.params?.objectValue() else {
-            let response = makeErrorResponse(
+            return makeErrorResponse(
                 id: request.id,
                 code: -32602,
                 message: "Invalid params: expected an object with 'name' and optional 'arguments'"
             )
-            writeLine(response)
-            return
         }
 
         guard let toolName = params["name"]?.stringValue() else {
-            let response = makeErrorResponse(
+            return makeErrorResponse(
                 id: request.id,
                 code: -32602,
                 message: "Invalid params: missing required 'name' field"
             )
-            writeLine(response)
-            return
         }
 
         let arguments = params["arguments"]?.objectValue() ?? [:]
@@ -238,38 +241,33 @@ public actor MCPServer {
                 + "Grant access in System Settings > Privacy & Security > Reminders "
                 + "for the app that launched this MCP server, then call the tool again."
             )
-            let line = encodeEnvelope(
+            return encodeEnvelope(
                 JSONRPCResponse(id: request.id, result: denied),
                 id: request.id
             )
-            writeLine(line)
-            return
         }
 
         let toolResult = await registry.call(tool: toolName, params: arguments)
 
-        let line = encodeEnvelope(
+        logStderr("Tool \(toolName) completed (isError: \(toolResult.isError ?? false))")
+        return encodeEnvelope(
             JSONRPCResponse(id: request.id, result: toolResult),
             id: request.id
         )
-        writeLine(line)
-        logStderr("Tool \(toolName) completed (isError: \(toolResult.isError ?? false))")
     }
 
     /// Responds to `resources/list` with an empty array (future-proofing).
-    private func handleResourcesList(_ request: JSONRPCRequest) {
+    private func handleResourcesList(_ request: JSONRPCRequest) -> String {
         let result: [String: JSONValue] = ["resources": .array([])]
-        let response = makeSuccessResponse(id: request.id, result: .object(result))
-        writeLine(response)
         logStderr("Returned empty resources list")
+        return makeSuccessResponse(id: request.id, result: .object(result))
     }
 
     /// Responds to `prompts/list` with an empty array (future-proofing).
-    private func handlePromptsList(_ request: JSONRPCRequest) {
+    private func handlePromptsList(_ request: JSONRPCRequest) -> String {
         let result: [String: JSONValue] = ["prompts": .array([])]
-        let response = makeSuccessResponse(id: request.id, result: .object(result))
-        writeLine(response)
         logStderr("Returned empty prompts list")
+        return makeSuccessResponse(id: request.id, result: .object(result))
     }
 
     // MARK: - Response Builders
