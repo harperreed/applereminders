@@ -61,6 +61,9 @@ public enum TokenFile {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        // Enforce 0700 on the leaf directory unconditionally: createDirectory's
+        // attributes argument is a no-op when the directory already exists.
+        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory)
         // SystemRandomNumberGenerator (behind UInt8.random) is cryptographically
         // secure on Apple platforms.
         var bytes = [UInt8](repeating: 0, count: 32)
