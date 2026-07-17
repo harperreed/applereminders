@@ -39,13 +39,18 @@ let package = Package(
                 ]),
             ]
         ),
+        .target(
+            name: "RemindersTestSupport",
+            dependencies: ["RemindersCore"],
+            path: "Tests/RemindersTestSupport"
+        ),
         .testTarget(
             name: "RemindersCoreTests",
-            dependencies: ["RemindersCore"]
+            dependencies: ["RemindersCore", "RemindersTestSupport"]
         ),
         .testTarget(
             name: "RemindersCLITests",
-            dependencies: ["reminders"]
+            dependencies: ["reminders", "RemindersTestSupport"]
         ),
     ],
     swiftLanguageModes: [.v6]
