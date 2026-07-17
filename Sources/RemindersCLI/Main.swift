@@ -21,6 +21,7 @@ struct RemindersTool: AsyncParsableCommand {
             DeleteCommand.self,
             EditCommand.self,
             NewListCommand.self,
+            ServeCommand.self,
         ]
     )
 
