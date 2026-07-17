@@ -14,7 +14,8 @@ struct EditCommand: AsyncParsableCommand {
     @Argument(help: "The name of the reminder list.")
     var listName: String
 
-    @Argument(help: "The index of the reminder to edit.")
+    @Argument(help: ArgumentHelp("The reminder to edit: a zero-based index from `show`, "
+        + "or a stable id from `show --format json`."))
     var index: String
 
     @Argument(parsing: .remaining, help: "New title text (joined with spaces). Omit to keep the current title.")
