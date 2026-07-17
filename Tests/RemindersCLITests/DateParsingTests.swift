@@ -130,16 +130,6 @@ struct FilterByDueDateTests {
         #expect(result.count == 2)
     }
 
-    @Test("unparseable dueDate filter returns all reminders")
-    func unparseableDateReturnsAll() {
-        let reminders = [
-            makeReminder(id: "1", title: "A"),
-            makeReminder(id: "2", title: "B"),
-        ]
-        let result = filterByDueDate(reminders, dueDate: "not-a-date", includeOverdue: false)
-        #expect(result.count == 2)
-    }
-
     @Test("filters out reminders without due dates")
     func filtersOutNoDueDate() {
         let calendar = Calendar.current
@@ -148,7 +138,7 @@ struct FilterByDueDateTests {
             makeReminder(id: "1", title: "Has due date", dueDate: tomorrow),
             makeReminder(id: "2", title: "No due date", dueDate: nil),
         ]
-        let result = filterByDueDate(reminders, dueDate: "tomorrow", includeOverdue: false)
+        let result = filterByDueDate(reminders, dueDate: parseDate("tomorrow"), includeOverdue: false)
         #expect(result.count == 1)
         #expect(result[0].id == "1")
     }
@@ -163,10 +153,10 @@ struct FilterByDueDateTests {
             makeReminder(id: "upcoming", title: "Upcoming", dueDate: tomorrow),
         ]
 
-        let withOverdue = filterByDueDate(reminders, dueDate: "tomorrow", includeOverdue: true)
+        let withOverdue = filterByDueDate(reminders, dueDate: parseDate("tomorrow"), includeOverdue: true)
         #expect(withOverdue.count == 2)
 
-        let withoutOverdue = filterByDueDate(reminders, dueDate: "tomorrow", includeOverdue: false)
+        let withoutOverdue = filterByDueDate(reminders, dueDate: parseDate("tomorrow"), includeOverdue: false)
         #expect(withoutOverdue.count == 1)
         #expect(withoutOverdue[0].id == "upcoming")
     }
@@ -182,7 +172,7 @@ struct FilterByDueDateTests {
             makeReminder(id: "later", title: "Later", dueDate: inTenDays),
         ]
         // Filter for "next week" — should include the 2-day-out item but not the 10-day-out item
-        let result = filterByDueDate(reminders, dueDate: "next week", includeOverdue: false)
+        let result = filterByDueDate(reminders, dueDate: parseDate("next week"), includeOverdue: false)
         #expect(result.count == 1)
         #expect(result[0].id == "soon")
     }

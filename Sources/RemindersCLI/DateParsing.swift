@@ -60,27 +60,23 @@ func parseDate(_ string: String) -> Date? {
     return nil
 }
 
-/// Filters reminders by an optional due-date string and/or overdue status.
+/// Filters reminders by an optional due date and/or overdue status.
+///
+/// Parsing happens at the call sites (all of which validate user input up
+/// front), so this function cannot silently ignore a bad date string.
 ///
 /// - Parameters:
 ///   - reminders: The full array of reminders to filter.
-///   - dueDate: A date string. If provided, only reminders due on or before that date are included.
+///   - dueDate: If provided, only reminders due on or before that date are included.
 ///   - includeOverdue: When `true` alongside a `dueDate` filter, also includes reminders
 ///     whose due date is in the past (before today).
 /// - Returns: The filtered array of reminders.
 func filterByDueDate(
     _ reminders: [ReminderItem],
-    dueDate: String?,
+    dueDate: Date?,
     includeOverdue: Bool
 ) -> [ReminderItem] {
-    guard let dueDate else {
-        return reminders
-    }
-
-    guard let targetDate = parseDate(dueDate) else {
-        // Defense-in-depth: all current call sites (AddCommand, ShowCommand,
-        // ShowAllCommand validate(), and MCP handleAddReminder) reject unparseable
-        // date strings before reaching here, so this branch is not the primary error path.
+    guard let targetDate = dueDate else {
         return reminders
     }
 

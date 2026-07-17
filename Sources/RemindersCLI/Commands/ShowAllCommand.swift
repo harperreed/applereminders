@@ -52,7 +52,7 @@ struct ShowAllCommand: AsyncParsableCommand {
 
             reminders = filterByDueDate(
                 reminders,
-                dueDate: dueDate,
+                dueDate: dueDate.flatMap(parseDate),
                 includeOverdue: includeOverdue
             )
 
