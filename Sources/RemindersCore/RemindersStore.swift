@@ -18,17 +18,28 @@ public actor RemindersStore {
 
     // MARK: - Properties
 
-    private let eventStore: EKEventStore
+    private let backend: any EventStoreBackend
     private let calendar: Calendar
     private var changeObserver: (any NSObjectProtocol)?
 
     // MARK: - Initialization
 
-    /// Creates a store with the given calendar for date calculations.
+    /// Creates a store backed by the real EventKit database.
     ///
     /// - Parameter calendar: The calendar used for date component conversions. Defaults to `.current`.
     public init(calendar: Calendar = .current) {
-        self.eventStore = EKEventStore()
+        self.backend = EventKitBackend()
+        self.calendar = calendar
+    }
+
+    /// Creates a store with an injected backend. Intended for tests, which
+    /// substitute an in-memory fake to avoid TCC.
+    ///
+    /// - Parameters:
+    ///   - backend: The EventKit seam implementation to use.
+    ///   - calendar: The calendar used for date component conversions. Defaults to `.current`.
+    public init(backend: any EventStoreBackend, calendar: Calendar = .current) {
+        self.backend = backend
         self.calendar = calendar
     }
 
@@ -39,7 +50,7 @@ public actor RemindersStore {
     /// Uses `requestFullAccessToReminders()` on macOS 14+. Throws a descriptive error
     /// if access is denied or insufficient.
     public func requestAccess() async throws {
-        let status = EKEventStore.authorizationStatus(for: .reminder)
+        let status = backend.reminderAuthorizationStatus()
 
         switch status {
         case .authorized, .fullAccess:
@@ -52,8 +63,7 @@ public actor RemindersStore {
             throw RemindersError.accessDenied
 
         case .notDetermined:
-            let store = UncheckedTransfer(value: eventStore)
-            let granted = try await store.value.requestFullAccessToReminders()
+            let granted = try await backend.requestReminderAccess()
             guard granted else {
                 throw RemindersError.accessDenied
             }
@@ -73,25 +83,23 @@ public actor RemindersStore {
     /// Safe to call more than once; only the first call registers. The CLI path is
     /// process-per-invocation and does not need this.
     ///
-    /// The closure intentionally captures only the `UncheckedTransfer` wrapper (an
-    /// immutable `let`), not `self`, so it can run off-actor without entering the
-    /// actor's executor — safe here because `EKEventStore.refreshSourcesIfNecessary()`
-    /// is thread-safe per Apple's documentation.
+    /// The closure captures only the `Sendable` backend, not `self`, so it can run
+    /// off-actor without entering the actor's executor — safe here because the backend
+    /// is documented thread-safe.
     ///
     /// The observer is retained for the process lifetime; no removal API is provided
     /// or needed for the MCP server use case.
     public func startObservingExternalChanges() {
         guard changeObserver == nil else { return }
-        let store = UncheckedTransfer(value: eventStore)
-        // `object: nil` avoids sending the non-Sendable EKEventStore across the
-        // closure boundary; this process only ever has one event store anyway.
+        let backend = self.backend
+        // `object: nil` because this process only ever has one event store.
         changeObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged,
             object: nil,
             queue: nil
         ) { _ in
             // EKEventStore is thread-safe; refresh directly on the posting thread.
-            store.value.refreshSourcesIfNecessary()
+            backend.refreshSourcesIfNecessary()
         }
     }
 
@@ -99,14 +107,14 @@ public actor RemindersStore {
 
     /// Returns all reminder lists (calendars of type `.reminder`).
     public func lists() -> [ReminderList] {
-        eventStore.calendars(for: .reminder).map { cal in
+        backend.reminderCalendars().map { cal in
             ReminderList(id: cal.calendarIdentifier, title: cal.title)
         }
     }
 
     /// Returns the title of the default reminder list, if one is configured.
     public func defaultListName() -> String? {
-        eventStore.defaultCalendarForNewReminders()?.title
+        backend.defaultReminderCalendar()?.title
     }
 
     /// Creates a new reminder list backed by a specific source.
@@ -117,21 +125,21 @@ public actor RemindersStore {
     /// - Returns: The newly created `ReminderList`.
     /// - Throws: `RemindersError.operationFailed` if the list cannot be saved.
     public func createList(name: String, sourceName: String? = nil) throws -> ReminderList {
-        let newCalendar = EKCalendar(for: .reminder, eventStore: eventStore)
+        let newCalendar = backend.makeCalendar()
         newCalendar.title = name
 
         if let sourceName {
-            guard let source = eventStore.sources.first(where: {
+            guard let source = backend.allSources.first(where: {
                 $0.title.caseInsensitiveCompare(sourceName) == .orderedSame
             }) else {
-                let available = eventStore.sources.map(\.title).joined(separator: ", ")
+                let available = backend.allSources.map(\.title).joined(separator: ", ")
                 throw RemindersError.operationFailed(
                     "No source found named \"\(sourceName)\". "
                     + "Available sources: \(available)"
                 )
             }
             newCalendar.source = source
-        } else if let defaultSource = eventStore.defaultCalendarForNewReminders()?.source {
+        } else if let defaultSource = backend.defaultReminderCalendar()?.source {
             newCalendar.source = defaultSource
         } else {
             throw RemindersError.operationFailed(
@@ -140,7 +148,7 @@ public actor RemindersStore {
         }
 
         do {
-            try eventStore.saveCalendar(newCalendar, commit: true)
+            try backend.saveCalendar(newCalendar, commit: true)
         } catch {
             throw RemindersError.operationFailed(
                 "Failed to save list \"\(name)\": \(error.localizedDescription)"
@@ -190,7 +198,7 @@ public actor RemindersStore {
     public func addReminder(_ draft: ReminderDraft, toList listName: String) throws -> ReminderItem {
         let targetCalendar = try resolveCalendar(named: listName)
 
-        let ekReminder = EKReminder(eventStore: eventStore)
+        let ekReminder = backend.makeReminder()
         ekReminder.title = draft.title
         ekReminder.notes = draft.notes
         ekReminder.calendar = targetCalendar
@@ -208,7 +216,7 @@ public actor RemindersStore {
         }
 
         do {
-            try eventStore.save(ekReminder, commit: true)
+            try backend.saveReminder(ekReminder, commit: true)
         } catch {
             throw RemindersError.operationFailed(
                 "Failed to save reminder \"\(draft.title)\": \(error.localizedDescription)"
@@ -252,7 +260,7 @@ public actor RemindersStore {
         }
 
         do {
-            try eventStore.save(ekReminder, commit: true)
+            try backend.saveReminder(ekReminder, commit: true)
         } catch {
             throw RemindersError.operationFailed(
                 "Failed to update completion status: \(error.localizedDescription)"
@@ -298,7 +306,7 @@ public actor RemindersStore {
         }
 
         do {
-            try eventStore.save(ekReminder, commit: true)
+            try backend.saveReminder(ekReminder, commit: true)
         } catch {
             throw RemindersError.operationFailed(
                 "Failed to edit reminder: \(error.localizedDescription)"
@@ -336,7 +344,7 @@ public actor RemindersStore {
         let deleted = mapReminder(ekReminder)
 
         do {
-            try eventStore.remove(ekReminder, commit: true)
+            try backend.removeReminder(ekReminder, commit: true)
         } catch {
             throw RemindersError.operationFailed(
                 "Failed to delete reminder \"\(deleted.title)\": \(error.localizedDescription)"
@@ -362,7 +370,7 @@ public actor RemindersStore {
     /// - Returns: The matching `EKCalendar`.
     /// - Throws: `RemindersError.listNotFound` with available list names for guidance.
     private func resolveCalendar(named name: String) throws -> EKCalendar {
-        let allCalendars = eventStore.calendars(for: .reminder)
+        let allCalendars = backend.reminderCalendars()
         guard let match = allCalendars.first(where: {
             $0.title.caseInsensitiveCompare(name) == .orderedSame
         }) else {
@@ -402,9 +410,12 @@ public actor RemindersStore {
             return (reminders[index], index)
         }
 
-        // Fall back to external identifier lookup.
+        // Accept either identifier: mapReminder emits the external identifier
+        // when EventKit has assigned one and the item identifier otherwise, so
+        // both must round-trip back to the same reminder.
         guard let matchIndex = reminders.firstIndex(where: {
             $0.calendarItemExternalIdentifier == indexOrID
+                || $0.calendarItemIdentifier == indexOrID
         }) else {
             throw RemindersError.reminderNotFound(indexOrID)
         }
@@ -423,7 +434,10 @@ public actor RemindersStore {
         }
 
         return ReminderItem(
-            id: ekReminder.calendarItemExternalIdentifier,
+            // External identifiers are only assigned once EventKit persists the
+            // object; fall back to the creation-time item identifier so unsaved
+            // reminders (fake backends in tests) still map without crashing.
+            id: ekReminder.calendarItemExternalIdentifier ?? ekReminder.calendarItemIdentifier,
             title: ekReminder.title ?? "",
             notes: ekReminder.notes,
             isCompleted: ekReminder.isCompleted,
@@ -447,17 +461,16 @@ public actor RemindersStore {
 
     // MARK: - Private Helpers (Fetching)
 
-    /// Fetches all reminders on the given calendars.
+    /// Fetches all reminders matching the given predicate.
     ///
-    /// Uses `fetchReminders(matching:completion:)` wrapped in a checked continuation
-    /// since EventKit does not provide a native async overload for this method.
-    /// The `UncheckedTransfer` wrapper is needed because `EKReminder` is not `Sendable`,
-    /// but the actor boundary guarantees exclusive access after the continuation resumes.
-    private func fetchReminders(on calendars: [EKCalendar]?) async throws -> [EKReminder] {
-        let store = UncheckedTransfer(value: eventStore)
-        let predicate = store.value.predicateForReminders(in: calendars)
+    /// Wraps the completion-based backend fetch in a checked continuation since
+    /// EventKit has no native async overload. The `UncheckedTransfer` wrapper is
+    /// needed because `EKReminder` is not `Sendable`, but the actor boundary
+    /// guarantees exclusive access after the continuation resumes.
+    private func fetchReminders(matching predicate: NSPredicate) async throws -> [EKReminder] {
+        let backend = self.backend
         let transfer = await withCheckedContinuation { (continuation: CheckedContinuation<UncheckedTransfer<[EKReminder]>, Never>) in
-            store.value.fetchReminders(matching: predicate) { reminders in
+            backend.fetchReminders(matching: predicate) { reminders in
                 continuation.resume(returning: UncheckedTransfer(value: reminders ?? []))
             }
         }
@@ -479,7 +492,7 @@ public actor RemindersStore {
         includeCompleted: Bool,
         onlyCompleted: Bool
     ) async throws -> [EKReminder] {
-        let allReminders = try await fetchReminders(on: calendars)
+        let allReminders = try await fetchReminders(matching: backend.remindersPredicate(in: calendars))
 
         if onlyCompleted {
             return allReminders.filter(\.isCompleted)
