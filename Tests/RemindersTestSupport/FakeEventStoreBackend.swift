@@ -139,11 +139,33 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
         }
     }
 
+    /// Records `calendars` in `_lastRequestedCalendars` so that the paired
+    /// `fetchReminders(matching:completion:)` call knows which scope to apply,
+    /// then returns an opaque `NSPredicate` placeholder.
+    ///
+    /// **Pairing contract:** EventKit's real predicate is opaque — its calendar
+    /// scope cannot be recovered once constructed. This fake mirrors that design:
+    /// calling `remindersPredicate(in:)` is the *only* way to establish the
+    /// calendar scope for the next fetch. Callers **must** invoke
+    /// `remindersPredicate(in:)` (or a completed/incomplete variant) immediately
+    /// before each `fetchReminders` call. Calling `fetchReminders` without a
+    /// prior predicate call returns all reminders (scope is treated as "all").
     public func remindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
         lock.withLock { _lastRequestedCalendars = calendars }
         return NSPredicate(value: true)
     }
 
+    /// Filters the in-memory reminders by the scope recorded during the most
+    /// recent `remindersPredicate(in:)` call and delivers the result to
+    /// `completion`.
+    ///
+    /// **Pairing contract:** The `predicate` argument is ignored — it is an
+    /// opaque `NSPredicate` whose calendar scope cannot be introspected. Instead,
+    /// this method reads `_lastRequestedCalendars`, which is written by
+    /// `remindersPredicate(in:)`. Callers **must** build a predicate via
+    /// `remindersPredicate(in:)` (or a completed/incomplete variant) immediately
+    /// before each fetch. If no predicate was built first, `_lastRequestedCalendars`
+    /// is `nil` (outer optional absent) and this method returns all reminders.
     public func fetchReminders(
         matching predicate: NSPredicate,
         completion: @escaping @Sendable ([EKReminder]?) -> Void
