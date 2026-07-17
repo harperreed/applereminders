@@ -49,6 +49,15 @@ struct RESTQuery {
     }
 }
 
+/// Reads the :id path parameter. Its absence is a routing bug, not client error.
+func requiredID(from context: some RequestContext) throws -> String {
+    guard let raw = context.parameters.get("id") else {
+        throw RESTError(status: .internalServerError, message: "Route is missing its id parameter")
+    }
+    let id = String(raw)
+    return id.removingPercentEncoding ?? id
+}
+
 /// Builds the router with both surfaces behind bearer auth.
 func buildRouter(
     store: RemindersStore,
@@ -95,6 +104,54 @@ func buildRouter(
             onlyCompleted: onlyCompleted
         )
         return try jsonResponse(filterByDueWindow(items, dueBefore: dueBefore, dueAfter: dueAfter))
+    }
+
+    api.post("reminders") { request, context -> Response in
+        let body = try await decodeJSONBody(CreateReminderRequest.self, from: request, context: context)
+        guard !body.title.isEmpty else {
+            throw RESTError(status: .badRequest, message: "Field \"title\" must not be empty")
+        }
+        let draft = ReminderDraft(
+            title: body.title,
+            notes: body.notes,
+            dueDate: try body.dueDate.map(parseDueDate),
+            priority: try parsePriority(body.priority) ?? .none
+        )
+        let item = try await store.addReminder(draft, toList: body.list)
+        return try jsonResponse(item, status: .created)
+    }
+
+    api.patch("reminders/:id") { request, context -> Response in
+        let id = try requiredID(from: context)
+        let body = try await decodeJSONBody(PatchReminderBody.self, from: request, context: context)
+        var dueDateChange: Date?? = nil
+        if let change = body.dueDate {
+            dueDateChange = .some(try change.map(parseDueDate))
+        }
+        let update = ReminderUpdate(
+            title: body.title,
+            notes: body.notes,
+            dueDate: dueDateChange,
+            priority: try parsePriority(body.priority),
+            listName: body.list
+        )
+        let item = try await store.update(byID: id, with: update)
+        return try jsonResponse(item)
+    }
+
+    api.post("reminders/:id/complete") { _, context -> Response in
+        let id = try requiredID(from: context)
+        return try jsonResponse(try await store.setCompleted(byID: id, completed: true))
+    }
+
+    api.post("reminders/:id/uncomplete") { _, context -> Response in
+        let id = try requiredID(from: context)
+        return try jsonResponse(try await store.setCompleted(byID: id, completed: false))
+    }
+
+    api.delete("reminders/:id") { _, context -> Response in
+        let id = try requiredID(from: context)
+        return try jsonResponse(try await store.delete(byID: id))
     }
 
     return router

@@ -31,3 +31,23 @@ func jsonResponse<T: Encodable>(_ value: T, status: HTTPResponse.Status = .ok) t
 func errorResponse(status: HTTPResponse.Status, message: String) throws -> Response {
     try jsonResponse(ErrorBody(error: message), status: status)
 }
+
+/// Decodes a JSON request body, mapping decode failures onto REST 400s.
+/// Collects the body and decodes with plain Foundation so validation errors
+/// thrown by DTO initializers (as RESTError) pass through intact.
+func decodeJSONBody<T: Decodable>(
+    _ type: T.Type,
+    from request: Request,
+    context: some RequestContext
+) async throws -> T {
+    let buffer = try await request.body.collect(upTo: context.maxUploadSize)
+    do {
+        return try JSONDecoder().decode(T.self, from: Data(buffer.readableBytesView))
+    } catch let error as RESTError {
+        throw error
+    } catch DecodingError.keyNotFound(let key, _) {
+        throw RESTError(status: .badRequest, message: "Missing required field \"\(key.stringValue)\"")
+    } catch {
+        throw RESTError(status: .badRequest, message: "Request body is not valid JSON for this endpoint")
+    }
+}
