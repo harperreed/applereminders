@@ -110,6 +110,7 @@ extension ReminderItem {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
+        // notes and completionDate omit rather than null; only dueDate needs explicit null for clear-operation visibility.
         try container.encodeIfPresent(notes, forKey: .notes)
         try container.encode(isCompleted, forKey: .isCompleted)
         try container.encodeIfPresent(completionDate, forKey: .completionDate)

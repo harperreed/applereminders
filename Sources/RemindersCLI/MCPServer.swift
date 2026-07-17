@@ -319,7 +319,7 @@ actor MCPServer {
     // MARK: - I/O
 
     /// Writes a single response line through the injected output.
-    private func writeLine(_ line: String) {
+    private nonisolated func writeLine(_ line: String) {
         output(line)
     }
 
@@ -964,7 +964,7 @@ actor MCPServer {
             let text = prettyEncodeJSON(updated)
             return .success(text)
         } catch {
-            return .error("Failed to edit reminder: \(error.localizedDescription)")
+            return .error("Failed to update reminder: \(error.localizedDescription)")
         }
     }
 
