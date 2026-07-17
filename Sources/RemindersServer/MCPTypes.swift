@@ -140,7 +140,7 @@ struct JSONRPCRequest: Decodable, Sendable {
 // MARK: - JSON-RPC Responses
 
 /// An outgoing JSON-RPC 2.0 success envelope. Encoding via JSONEncoder guarantees
-/// correct escaping of IDs and results — never build these by string concatenation.
+/// correct escaping of IDs and results; never build these by string concatenation.
 struct JSONRPCResponse<Payload: Encodable & Sendable>: Encodable, Sendable {
     let id: RequestID?
     let result: Payload

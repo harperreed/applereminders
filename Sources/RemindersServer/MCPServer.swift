@@ -277,7 +277,7 @@ public actor MCPServer {
     /// Encodes a JSON-RPC envelope to a single-line string via JSONEncoder.
     /// Falls back to an error response (and finally to a constant) so the server
     /// always writes valid JSON no matter what encoding throws. The fallback calls
-    /// `makeErrorResponse` directly — `makeErrorResponse` has its own independent
+    /// `makeErrorResponse` directly; `makeErrorResponse` has its own independent
     /// fallback and does not re-enter `encodeEnvelope`.
     private func encodeEnvelope<T: Encodable>(_ envelope: T, id: RequestID?) -> String {
         do {
@@ -508,8 +508,8 @@ public actor MCPServer {
                 name: "uncomplete_reminder",
                 description: "Mark a completed reminder as incomplete (reopen it). Only completed "
                     + "reminders can be targeted. Pass the reminder's stable id (preferred) or "
-                    + "its zero-based position among the COMPLETED reminders only — the view "
-                    + "shown by show_reminders with only_completed=true, not the default view. "
+                    + "its zero-based position among the COMPLETED reminders only (the view "
+                    + "shown by show_reminders with only_completed=true, not the default view). "
                     + "Returns the updated reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
@@ -990,7 +990,7 @@ public actor MCPServer {
 
     /// Parses an optional due-bound parameter (e.g. `due_before` or `due_after`) from the tool
     /// params dictionary. Returns `(nil, nil)` when the key is absent, `(date, nil)` when present
-    /// and parseable, or `(nil, toolError)` when the value cannot be parsed — with an error message
+    /// and parseable, or `(nil, toolError)` when the value cannot be parsed, with an error message
     /// that names the key and the supported formats.
     private static func parseDueBound(
         _ key: String,
