@@ -20,6 +20,7 @@ public actor RemindersStore {
 
     private let eventStore: EKEventStore
     private let calendar: Calendar
+    private var changeObserver: (any NSObjectProtocol)?
 
     // MARK: - Initialization
 
@@ -59,6 +60,30 @@ public actor RemindersStore {
 
         @unknown default:
             throw RemindersError.accessDenied
+        }
+    }
+
+    // MARK: - Change Observation
+
+    /// Begins refreshing EventKit sources whenever the Calendar database changes.
+    ///
+    /// Long-running processes (the MCP server) otherwise risk serving stale data:
+    /// once `.EKEventStoreChanged` fires, previously fetched objects are invalid and
+    /// `refreshSourcesIfNecessary()` must run before new fetches see current state.
+    /// Safe to call more than once; only the first call registers. The CLI path is
+    /// process-per-invocation and does not need this.
+    public func startObservingExternalChanges() {
+        guard changeObserver == nil else { return }
+        let store = UncheckedTransfer(value: eventStore)
+        // `object: nil` avoids sending the non-Sendable EKEventStore across the
+        // closure boundary; this process only ever has one event store anyway.
+        changeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: nil,
+            queue: nil
+        ) { _ in
+            // EKEventStore is thread-safe; refresh directly on the posting thread.
+            store.value.refreshSourcesIfNecessary()
         }
     }
 

@@ -32,6 +32,7 @@ struct RemindersTool: AsyncParsableCommand {
             // the process before the MCP handshake and the client would only see EOF.
             // MCPServer requests access per tools/call and reports denial as a tool error.
             let store = RemindersStore()
+            await store.startObservingExternalChanges()
             let server = MCPServer(store: store)
             await server.run()
         } else {
