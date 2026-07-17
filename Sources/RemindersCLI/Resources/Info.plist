@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>NSRemindersUsageDescription</key>
+    <key>NSRemindersFullAccessUsageDescription</key>
     <string>This app needs access to your reminders to manage them from the command line.</string>
 </dict>
 </plist>

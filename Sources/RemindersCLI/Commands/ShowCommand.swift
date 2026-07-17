@@ -35,6 +35,14 @@ struct ShowCommand: AsyncParsableCommand {
                 "Cannot use --only-completed and --include-completed together."
             )
         }
+
+        if let dueDate {
+            guard parseDate(dueDate) != nil else {
+                throw ValidationError(
+                    "Could not parse date \"\(dueDate)\". Supported formats: \(supportedDateFormats)."
+                )
+            }
+        }
     }
 
     func run() async throws {

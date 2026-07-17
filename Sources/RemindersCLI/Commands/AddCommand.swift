@@ -46,8 +46,7 @@ struct AddCommand: AsyncParsableCommand {
         if let dueDate {
             guard parseDate(dueDate) != nil else {
                 throw ValidationError(
-                    "Could not parse date \"\(dueDate)\". "
-                    + "Supported formats: today, tomorrow, next week, yyyy-MM-dd, MM/dd/yyyy, MM/dd."
+                    "Could not parse date \"\(dueDate)\". Supported formats: \(supportedDateFormats)."
                 )
             }
         }

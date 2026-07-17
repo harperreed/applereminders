@@ -154,31 +154,12 @@ actor MCPServer {
     /// Responds to `tools/list` with the full array of tool definitions.
     private func handleToolsList(_ request: JSONRPCRequest) {
         let tools = registry.allDefinitions()
-
-        do {
-            let toolsData = try encoder.encode(tools)
-            guard let toolsJSON = String(data: toolsData, encoding: .utf8) else {
-                let response = makeErrorResponse(
-                    id: request.id,
-                    code: -32603,
-                    message: "Failed to encode tools list"
-                )
-                writeLine(response)
-                return
-            }
-            // Build the response manually so we can embed the pre-encoded tools array.
-            let idString = encodeID(request.id)
-            let line = "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"result\":{\"tools\":\(toolsJSON)}}"
-            writeLine(line)
-            logStderr("Returned \(tools.count) tool definitions")
-        } catch {
-            let response = makeErrorResponse(
-                id: request.id,
-                code: -32603,
-                message: "Failed to encode tools: \(error.localizedDescription)"
-            )
-            writeLine(response)
-        }
+        let line = encodeEnvelope(
+            JSONRPCResponse(id: request.id, result: ToolsListResult(tools: tools)),
+            id: request.id
+        )
+        writeLine(line)
+        logStderr("Returned \(tools.count) tool definitions")
     }
 
     // MARK: - Tool Call Dispatch
@@ -210,25 +191,32 @@ actor MCPServer {
 
         logStderr("Calling tool: \(toolName)")
 
+        // Reminders access is requested lazily so the protocol stream stays alive even
+        // when access is denied; the failure surfaces as an actionable tool error.
+        do {
+            try await store.requestAccess()
+        } catch {
+            let denied = MCPToolResult.error(
+                "Reminders access is not available: \(error.localizedDescription) "
+                + "Grant access in System Settings > Privacy & Security > Reminders "
+                + "for the app that launched this MCP server, then call the tool again."
+            )
+            let line = encodeEnvelope(
+                JSONRPCResponse(id: request.id, result: denied),
+                id: request.id
+            )
+            writeLine(line)
+            return
+        }
+
         let toolResult = await registry.call(tool: toolName, params: arguments)
 
-        do {
-            let resultData = try encoder.encode(toolResult)
-            guard let resultJSON = String(data: resultData, encoding: .utf8) else {
-                throw MCPToolError.encodingFailed
-            }
-            let idString = encodeID(request.id)
-            let line = "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"result\":\(resultJSON)}"
-            writeLine(line)
-            logStderr("Tool \(toolName) completed (isError: \(toolResult.isError ?? false))")
-        } catch {
-            let response = makeErrorResponse(
-                id: request.id,
-                code: -32603,
-                message: "Internal error encoding tool result: \(error.localizedDescription)"
-            )
-            writeLine(response)
-        }
+        let line = encodeEnvelope(
+            JSONRPCResponse(id: request.id, result: toolResult),
+            id: request.id
+        )
+        writeLine(line)
+        logStderr("Tool \(toolName) completed (isError: \(toolResult.isError ?? false))")
     }
 
     /// Responds to `resources/list` with an empty array (future-proofing).
@@ -249,43 +237,45 @@ actor MCPServer {
 
     // MARK: - Response Builders
 
+    /// Encodes a JSON-RPC envelope to a single-line string via JSONEncoder.
+    /// Falls back to an error response (and finally to a constant) so the server
+    /// always writes valid JSON no matter what encoding throws. The fallback calls
+    /// `makeErrorResponse` directly — `makeErrorResponse` has its own independent
+    /// fallback and does not re-enter `encodeEnvelope`.
+    private func encodeEnvelope<T: Encodable>(_ envelope: T, id: RequestID?) -> String {
+        do {
+            let data = try encoder.encode(envelope)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw MCPToolError.encodingFailed
+            }
+            return json
+        } catch {
+            logStderr("envelope encode error: \(error.localizedDescription)")
+            return makeErrorResponse(id: id, code: -32603, message: "Failed to encode response")
+        }
+    }
+
     /// Builds a JSON-RPC success response string.
     private func makeSuccessResponse(id: RequestID?, result: JSONValue) -> String {
-        let idString = encodeID(id)
-        do {
-            let resultData = try encoder.encode(result)
-            guard let resultJSON = String(data: resultData, encoding: .utf8) else {
-                return makeErrorResponse(id: id, code: -32603, message: "Failed to encode result")
-            }
-            return "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"result\":\(resultJSON)}"
-        } catch {
-            return makeErrorResponse(id: id, code: -32603, message: "Failed to encode result")
-        }
+        encodeEnvelope(JSONRPCResponse(id: id, result: result), id: id)
     }
 
     /// Builds a JSON-RPC error response string.
     private func makeErrorResponse(id: RequestID?, code: Int, message: String) -> String {
-        let idString = encodeID(id)
-        let escapedMessage = message
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"error\":{\"code\":\(code),\"message\":\"\(escapedMessage)\"}}"
-    }
-
-    // MARK: - Encoding Helpers
-
-    /// Encodes a RequestID to its JSON representation for manual string building.
-    private func encodeID(_ id: RequestID?) -> String {
-        guard let id else { return "null" }
-        switch id {
-        case .string(let value):
-            let escaped = value
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\""
-        case .int(let value):
-            return "\(value)"
+        let envelope = JSONRPCErrorResponse(
+            id: id,
+            error: JSONRPCErrorBody(code: code, message: message)
+        )
+        do {
+            let data = try encoder.encode(envelope)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw MCPToolError.encodingFailed
+            }
+            return json
+        } catch {
+            // Deliberately contains no interpolated data: it must always be valid JSON.
+            logStderr("error envelope encode failed: \(error.localizedDescription)")
+            return #"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error: failed to encode response"}}"#
         }
     }
 
@@ -314,7 +304,7 @@ actor MCPServer {
     // MARK: - Tool Definitions
 
     /// Builds the array of all 9 tool definitions exposed by this MCP server.
-    private static func buildToolDefinitions() -> [MCPToolDefinition] {
+    static func buildToolDefinitions() -> [MCPToolDefinition] {
         [
             MCPToolDefinition(
                 name: "show_lists",
@@ -332,8 +322,10 @@ actor MCPServer {
                 description: "Show reminders from a specific list. By default only returns "
                     + "incomplete reminders. Use include_completed to also see finished items, "
                     + "or only_completed to see exclusively completed reminders. "
-                    + "Returns a JSON array of reminder objects with index, title, notes, "
-                    + "due date, priority, and completion status.",
+                    + "Returns a JSON array of reminder objects with id, title, notes, "
+                    + "isCompleted, completionDate, priority, dueDate, listID, and listName "
+                    + "fields. Pass a reminder's id to complete_reminder, uncomplete_reminder, "
+                    + "delete_reminder, or edit_reminder to target it reliably.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -362,7 +354,9 @@ actor MCPServer {
                 name: "show_all_reminders",
                 description: "Show reminders from all lists at once. Each reminder includes its "
                     + "list name. By default only returns incomplete reminders. "
-                    + "Useful for getting a full overview of all pending tasks.",
+                    + "Useful for getting a full overview of all pending tasks. "
+                    + "Returns the same JSON reminder objects as show_reminders; each object's "
+                    + "id is a stable identifier accepted by the mutating tools.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -422,8 +416,10 @@ actor MCPServer {
             ),
             MCPToolDefinition(
                 name: "complete_reminder",
-                description: "Mark a reminder as completed. Identify the target reminder by its "
-                    + "zero-based index within the list (as shown by show_reminders).",
+                description: "Mark a reminder as completed. Only incomplete reminders can be "
+                    + "targeted. Pass the reminder's stable id (preferred) or its zero-based "
+                    + "position among the list's incomplete reminders. Returns the updated "
+                    + "reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -433,8 +429,11 @@ actor MCPServer {
                             enum: nil
                         ),
                         "index": PropertySchema(
-                            type: "string",
-                            description: "The zero-based index of the reminder to complete, as a string.",
+                            types: ["string", "integer"],
+                            description: "The reminder's stable id from show_reminders (preferred; "
+                                + "unaffected by list changes), or its zero-based position among "
+                                + "the list's incomplete reminders (fragile: positions shift as "
+                                + "reminders change).",
                             enum: nil
                         ),
                     ],
@@ -443,8 +442,11 @@ actor MCPServer {
             ),
             MCPToolDefinition(
                 name: "uncomplete_reminder",
-                description: "Mark a completed reminder as incomplete (reopen it). Identify the "
-                    + "target reminder by its zero-based index within the list.",
+                description: "Mark a completed reminder as incomplete (reopen it). Only completed "
+                    + "reminders can be targeted. Pass the reminder's stable id (preferred) or "
+                    + "its zero-based position among the COMPLETED reminders only — the view "
+                    + "shown by show_reminders with only_completed=true, not the default view. "
+                    + "Returns the updated reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -454,8 +456,10 @@ actor MCPServer {
                             enum: nil
                         ),
                         "index": PropertySchema(
-                            type: "string",
-                            description: "The zero-based index of the reminder to uncomplete, as a string.",
+                            types: ["string", "integer"],
+                            description: "The reminder's stable id from show_reminders (preferred), "
+                                + "or its zero-based position among the list's COMPLETED reminders "
+                                + "(as listed by show_reminders with only_completed=true).",
                             enum: nil
                         ),
                     ],
@@ -465,7 +469,9 @@ actor MCPServer {
             MCPToolDefinition(
                 name: "delete_reminder",
                 description: "Permanently delete a reminder from a list. This action cannot be "
-                    + "undone. Identify the target reminder by its zero-based index.",
+                    + "undone. Only incomplete reminders can be targeted. Pass the reminder's "
+                    + "stable id (preferred) or its zero-based position among the list's "
+                    + "incomplete reminders. Returns the deleted reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -475,8 +481,11 @@ actor MCPServer {
                             enum: nil
                         ),
                         "index": PropertySchema(
-                            type: "string",
-                            description: "The zero-based index of the reminder to delete, as a string.",
+                            types: ["string", "integer"],
+                            description: "The reminder's stable id from show_reminders (preferred; "
+                                + "unaffected by list changes), or its zero-based position among "
+                                + "the list's incomplete reminders (fragile: positions shift as "
+                                + "reminders change).",
                             enum: nil
                         ),
                     ],
@@ -486,8 +495,10 @@ actor MCPServer {
             MCPToolDefinition(
                 name: "edit_reminder",
                 description: "Edit an existing reminder's title and/or notes. Only the fields you "
-                    + "provide will be changed; omitted fields remain untouched. Identify the "
-                    + "target reminder by its zero-based index.",
+                    + "provide will be changed; omitted fields remain untouched. Only incomplete "
+                    + "reminders can be targeted. Pass the reminder's stable id (preferred) or "
+                    + "its zero-based position among the list's incomplete reminders. Returns "
+                    + "the updated reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -497,8 +508,11 @@ actor MCPServer {
                             enum: nil
                         ),
                         "index": PropertySchema(
-                            type: "string",
-                            description: "The zero-based index of the reminder to edit, as a string.",
+                            types: ["string", "integer"],
+                            description: "The reminder's stable id from show_reminders (preferred; "
+                                + "unaffected by list changes), or its zero-based position among "
+                                + "the list's incomplete reminders (fragile: positions shift as "
+                                + "reminders change).",
                             enum: nil
                         ),
                         "title": PropertySchema(
@@ -655,9 +669,7 @@ actor MCPServer {
         if let dueDateString = params["due_date"]?.stringValue() {
             guard let date = parseDate(dueDateString) else {
                 return .error(
-                    "Invalid due_date \"\(dueDateString)\". "
-                    + "Supported formats: today, tomorrow, next week, yyyy-MM-dd, "
-                    + "yyyy-MM-dd HH:mm, MM/dd/yyyy, MM/dd."
+                    "Invalid due_date \"\(dueDateString)\". Supported formats: \(supportedDateFormats)."
                 )
             }
             parsedDueDate = date
@@ -751,8 +763,9 @@ actor MCPServer {
         }
 
         do {
-            let deletedTitle = try await store.delete(itemAtIndex: index, onList: listName)
-            return .success("Deleted reminder: \(deletedTitle)")
+            let deleted = try await store.delete(itemAtIndex: index, onList: listName)
+            let text = prettyEncodeJSON(deleted)
+            return .success(text)
         } catch {
             return .error("Failed to delete reminder: \(error.localizedDescription)")
         }

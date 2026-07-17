@@ -1,5 +1,5 @@
 // ABOUTME: CLI subcommand that marks a reminder as incomplete.
-// ABOUTME: Identifies the reminder by its index within the specified list.
+// ABOUTME: Resolves the index against completed reminders only, or accepts a stable id.
 
 import ArgumentParser
 import Foundation
@@ -14,7 +14,9 @@ struct UncompleteCommand: AsyncParsableCommand {
     @Argument(help: "The name of the reminder list.")
     var listName: String
 
-    @Argument(help: "The index of the reminder to uncomplete.")
+    @Argument(help: ArgumentHelp("The reminder to reopen: a zero-based index into the COMPLETED "
+        + "reminders (see `show <list> --only-completed`), or a stable id from "
+        + "`show --format json`."))
     var index: String
 
     func run() async throws {

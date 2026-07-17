@@ -137,6 +137,63 @@ struct JSONRPCRequest: Decodable, Sendable {
     let params: JSONValue?
 }
 
+// MARK: - JSON-RPC Responses
+
+/// An outgoing JSON-RPC 2.0 success envelope. Encoding via JSONEncoder guarantees
+/// correct escaping of IDs and results — never build these by string concatenation.
+struct JSONRPCResponse<Payload: Encodable & Sendable>: Encodable, Sendable {
+    let id: RequestID?
+    let result: Payload
+
+    private enum CodingKeys: String, CodingKey {
+        case jsonrpc, id, result
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode("2.0", forKey: .jsonrpc)
+        // JSON-RPC 2.0 requires an explicit `"id": null` when the request ID is unknown.
+        if let id {
+            try container.encode(id, forKey: .id)
+        } else {
+            try container.encodeNil(forKey: .id)
+        }
+        try container.encode(result, forKey: .result)
+    }
+}
+
+/// The `error` member of a JSON-RPC 2.0 error response.
+struct JSONRPCErrorBody: Encodable, Sendable, Equatable {
+    let code: Int
+    let message: String
+}
+
+/// An outgoing JSON-RPC 2.0 error envelope.
+struct JSONRPCErrorResponse: Encodable, Sendable {
+    let id: RequestID?
+    let error: JSONRPCErrorBody
+
+    private enum CodingKeys: String, CodingKey {
+        case jsonrpc, id, error
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode("2.0", forKey: .jsonrpc)
+        if let id {
+            try container.encode(id, forKey: .id)
+        } else {
+            try container.encodeNil(forKey: .id)
+        }
+        try container.encode(error, forKey: .error)
+    }
+}
+
+/// The `result` payload for `tools/list`.
+struct ToolsListResult: Encodable, Sendable {
+    let tools: [MCPToolDefinition]
+}
+
 // MARK: - MCP Tool Definitions
 
 /// Describes a single tool exposed by the MCP server.
@@ -154,10 +211,22 @@ struct JSONSchema: Encodable, Sendable {
 }
 
 /// Schema for a single property within a JSON Schema.
+/// `types` holds one or more JSON Schema types; a single entry encodes as a bare
+/// string (`"type": "string"`), multiple entries as an array (`"type": ["string", "integer"]`).
 struct PropertySchema: Encodable, Sendable {
-    let type: String
+    let types: [String]
     let description: String
     let `enum`: [String]?
+
+    init(type: String, description: String, enum enumValues: [String]?) {
+        self.init(types: [type], description: description, enum: enumValues)
+    }
+
+    init(types: [String], description: String, enum enumValues: [String]?) {
+        self.types = types
+        self.description = description
+        self.enum = enumValues
+    }
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -167,7 +236,11 @@ struct PropertySchema: Encodable, Sendable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(type, forKey: .type)
+        if types.count == 1 {
+            try container.encode(types[0], forKey: .type)
+        } else {
+            try container.encode(types, forKey: .type)
+        }
         try container.encode(description, forKey: .description)
         if let enumValues = self.enum {
             try container.encode(enumValues, forKey: .enum)

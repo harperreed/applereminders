@@ -22,7 +22,12 @@ swift build
 .build/debug/reminders --mcp
 ```
 
-Add to Claude Code settings:
+Add to Claude Code:
+```bash
+claude mcp add reminders -- /path/to/reminders --mcp
+```
+
+Other MCP clients use the equivalent JSON config:
 ```json
 {
   "mcpServers": {
@@ -37,6 +42,7 @@ Add to Claude Code settings:
 ## Test
 
 ```bash
+make check   # canonical: build + full test suite
 swift test
 ```
 

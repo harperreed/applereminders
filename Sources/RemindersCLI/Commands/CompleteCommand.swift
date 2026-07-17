@@ -14,7 +14,8 @@ struct CompleteCommand: AsyncParsableCommand {
     @Argument(help: "The name of the reminder list.")
     var listName: String
 
-    @Argument(help: "The index of the reminder to complete.")
+    @Argument(help: ArgumentHelp("The reminder to complete: a zero-based index from `show`, "
+        + "or a stable id from `show --format json`."))
     var index: String
 
     func run() async throws {

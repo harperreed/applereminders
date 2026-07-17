@@ -4,6 +4,10 @@
 import Foundation
 import RemindersCore
 
+/// Single source of truth for the date formats accepted by `parseDate`, in the order tried.
+/// Every error message that rejects a date string must reference this list.
+let supportedDateFormats = "today, tomorrow, next week, yyyy-MM-dd, yyyy-MM-dd HH:mm, MM/dd/yyyy, MM/dd"
+
 /// Parses a user-supplied date string into a `Date`.
 ///
 /// Supported formats (tried in order):
@@ -74,7 +78,9 @@ func filterByDueDate(
     }
 
     guard let targetDate = parseDate(dueDate) else {
-        // If the date string is unparseable, return everything unfiltered.
+        // Defense-in-depth: all current call sites (AddCommand, ShowCommand,
+        // ShowAllCommand validate(), and MCP handleAddReminder) reject unparseable
+        // date strings before reaching here, so this branch is not the primary error path.
         return reminders
     }
 
