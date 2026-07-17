@@ -154,31 +154,12 @@ actor MCPServer {
     /// Responds to `tools/list` with the full array of tool definitions.
     private func handleToolsList(_ request: JSONRPCRequest) {
         let tools = registry.allDefinitions()
-
-        do {
-            let toolsData = try encoder.encode(tools)
-            guard let toolsJSON = String(data: toolsData, encoding: .utf8) else {
-                let response = makeErrorResponse(
-                    id: request.id,
-                    code: -32603,
-                    message: "Failed to encode tools list"
-                )
-                writeLine(response)
-                return
-            }
-            // Build the response manually so we can embed the pre-encoded tools array.
-            let idString = encodeID(request.id)
-            let line = "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"result\":{\"tools\":\(toolsJSON)}}"
-            writeLine(line)
-            logStderr("Returned \(tools.count) tool definitions")
-        } catch {
-            let response = makeErrorResponse(
-                id: request.id,
-                code: -32603,
-                message: "Failed to encode tools: \(error.localizedDescription)"
-            )
-            writeLine(response)
-        }
+        let line = encodeEnvelope(
+            JSONRPCResponse(id: request.id, result: ToolsListResult(tools: tools)),
+            id: request.id
+        )
+        writeLine(line)
+        logStderr("Returned \(tools.count) tool definitions")
     }
 
     // MARK: - Tool Call Dispatch
@@ -212,23 +193,12 @@ actor MCPServer {
 
         let toolResult = await registry.call(tool: toolName, params: arguments)
 
-        do {
-            let resultData = try encoder.encode(toolResult)
-            guard let resultJSON = String(data: resultData, encoding: .utf8) else {
-                throw MCPToolError.encodingFailed
-            }
-            let idString = encodeID(request.id)
-            let line = "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"result\":\(resultJSON)}"
-            writeLine(line)
-            logStderr("Tool \(toolName) completed (isError: \(toolResult.isError ?? false))")
-        } catch {
-            let response = makeErrorResponse(
-                id: request.id,
-                code: -32603,
-                message: "Internal error encoding tool result: \(error.localizedDescription)"
-            )
-            writeLine(response)
-        }
+        let line = encodeEnvelope(
+            JSONRPCResponse(id: request.id, result: toolResult),
+            id: request.id
+        )
+        writeLine(line)
+        logStderr("Tool \(toolName) completed (isError: \(toolResult.isError ?? false))")
     }
 
     /// Responds to `resources/list` with an empty array (future-proofing).
@@ -249,43 +219,43 @@ actor MCPServer {
 
     // MARK: - Response Builders
 
+    /// Encodes a JSON-RPC envelope to a single-line string via JSONEncoder.
+    /// Falls back to an error response (and finally to a constant) so the server
+    /// always writes valid JSON no matter what encoding throws.
+    private func encodeEnvelope<T: Encodable>(_ envelope: T, id: RequestID?) -> String {
+        do {
+            let data = try encoder.encode(envelope)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw MCPToolError.encodingFailed
+            }
+            return json
+        } catch {
+            logStderr("envelope encode error: \(error.localizedDescription)")
+            return makeErrorResponse(id: id, code: -32603, message: "Failed to encode response")
+        }
+    }
+
     /// Builds a JSON-RPC success response string.
     private func makeSuccessResponse(id: RequestID?, result: JSONValue) -> String {
-        let idString = encodeID(id)
-        do {
-            let resultData = try encoder.encode(result)
-            guard let resultJSON = String(data: resultData, encoding: .utf8) else {
-                return makeErrorResponse(id: id, code: -32603, message: "Failed to encode result")
-            }
-            return "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"result\":\(resultJSON)}"
-        } catch {
-            return makeErrorResponse(id: id, code: -32603, message: "Failed to encode result")
-        }
+        encodeEnvelope(JSONRPCResponse(id: id, result: result), id: id)
     }
 
     /// Builds a JSON-RPC error response string.
     private func makeErrorResponse(id: RequestID?, code: Int, message: String) -> String {
-        let idString = encodeID(id)
-        let escapedMessage = message
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return "{\"jsonrpc\":\"2.0\",\"id\":\(idString),\"error\":{\"code\":\(code),\"message\":\"\(escapedMessage)\"}}"
-    }
-
-    // MARK: - Encoding Helpers
-
-    /// Encodes a RequestID to its JSON representation for manual string building.
-    private func encodeID(_ id: RequestID?) -> String {
-        guard let id else { return "null" }
-        switch id {
-        case .string(let value):
-            let escaped = value
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\""
-        case .int(let value):
-            return "\(value)"
+        let envelope = JSONRPCErrorResponse(
+            id: id,
+            error: JSONRPCErrorBody(code: code, message: message)
+        )
+        do {
+            let data = try encoder.encode(envelope)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw MCPToolError.encodingFailed
+            }
+            return json
+        } catch {
+            // Deliberately contains no interpolated data: it must always be valid JSON.
+            logStderr("error envelope encode failed: \(error.localizedDescription)")
+            return #"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error: failed to encode response"}}"#
         }
     }
 
