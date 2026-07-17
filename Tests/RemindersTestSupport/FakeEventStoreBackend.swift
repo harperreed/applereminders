@@ -168,6 +168,8 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
         return NSPredicate(value: true)
     }
 
+    /// Records `calendars` in `_lastRequestedCalendars` and sets `_lastFetchKind`
+    /// to `.incomplete`; see `remindersPredicate(in:)` for the pairing contract.
     public func incompleteRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
         lock.withLock {
             _lastRequestedCalendars = calendars
@@ -176,6 +178,8 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
         return NSPredicate(value: true)
     }
 
+    /// Records `calendars` in `_lastRequestedCalendars` and sets `_lastFetchKind`
+    /// to `.completed`; see `remindersPredicate(in:)` for the pairing contract.
     public func completedRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
         lock.withLock {
             _lastRequestedCalendars = calendars
@@ -185,16 +189,16 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
     }
 
     /// Filters the in-memory reminders by the scope recorded during the most
-    /// recent `remindersPredicate(in:)` call and delivers the result to
-    /// `completion`.
+    /// recent predicate-builder call and delivers the result to `completion`.
     ///
     /// **Pairing contract:** The `predicate` argument is ignored — it is an
     /// opaque `NSPredicate` whose calendar scope cannot be introspected. Instead,
     /// this method reads `_lastRequestedCalendars`, which is written by
-    /// `remindersPredicate(in:)`. Callers **must** build a predicate via
-    /// `remindersPredicate(in:)` (or a completed/incomplete variant) immediately
-    /// before each fetch. If no predicate was built first, `_lastRequestedCalendars`
-    /// is `nil` (outer optional absent) and this method returns all reminders.
+    /// `remindersPredicate(in:)`, `incompleteRemindersPredicate(in:)`, or
+    /// `completedRemindersPredicate(in:)`. Callers **must** build a predicate via
+    /// one of those methods immediately before each fetch. If no predicate was
+    /// built first, `_lastRequestedCalendars` is `nil` (outer optional absent)
+    /// and this method returns all reminders.
     public func fetchReminders(
         matching predicate: NSPredicate,
         completion: @escaping @Sendable ([EKReminder]?) -> Void
