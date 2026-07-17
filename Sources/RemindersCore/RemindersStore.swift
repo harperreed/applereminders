@@ -284,13 +284,13 @@ public actor RemindersStore {
     ///   - listName: The name of the list containing the reminder.
     ///   - includeCompleted: Whether to include completed reminders when resolving the index.
     ///   - onlyCompleted: If `true`, only completed reminders are considered when resolving the index.
-    /// - Returns: The title of the deleted reminder.
+    /// - Returns: A snapshot of the deleted reminder, captured before removal.
     public func delete(
         itemAtIndex: String,
         onList listName: String,
         includeCompleted: Bool = false,
         onlyCompleted: Bool = false
-    ) async throws -> String {
+    ) async throws -> ReminderItem {
         let targetCalendar = try resolveCalendar(named: listName)
         let filtered = try await fetchFilteredEKReminders(
             on: [targetCalendar],
@@ -299,17 +299,18 @@ public actor RemindersStore {
         )
         let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
 
-        let deletedTitle = ekReminder.title ?? "(untitled)"
+        // Snapshot before removal: EventKit invalidates the object once it is deleted.
+        let deleted = mapReminder(ekReminder)
 
         do {
             try eventStore.remove(ekReminder, commit: true)
         } catch {
             throw RemindersError.operationFailed(
-                "Failed to delete reminder \"\(deletedTitle)\": \(error.localizedDescription)"
+                "Failed to delete reminder \"\(deleted.title)\": \(error.localizedDescription)"
             )
         }
 
-        return deletedTitle
+        return deleted
     }
 
     // MARK: - Private Types

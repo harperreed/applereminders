@@ -20,11 +20,11 @@ struct DeleteCommand: AsyncParsableCommand {
     func run() async throws {
         await withGracefulErrors {
             let store = try await makeStore()
-            let deletedTitle = try await store.delete(
+            let deleted = try await store.delete(
                 itemAtIndex: index,
                 onList: listName
             )
-            print("Deleted: \(deletedTitle)")
+            print("Deleted: \(deleted.title)")
         }
     }
 }

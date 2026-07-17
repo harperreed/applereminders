@@ -721,8 +721,9 @@ actor MCPServer {
         }
 
         do {
-            let deletedTitle = try await store.delete(itemAtIndex: index, onList: listName)
-            return .success("Deleted reminder: \(deletedTitle)")
+            let deleted = try await store.delete(itemAtIndex: index, onList: listName)
+            let text = prettyEncodeJSON(deleted)
+            return .success(text)
         } catch {
             return .error("Failed to delete reminder: \(error.localizedDescription)")
         }
