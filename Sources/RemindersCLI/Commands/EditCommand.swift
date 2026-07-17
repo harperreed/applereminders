@@ -30,11 +30,10 @@ struct EditCommand: AsyncParsableCommand {
 
             let titleText: String? = newText.isEmpty ? nil : newText.joined(separator: " ")
 
-            let updated = try await store.edit(
+            let updated = try await store.update(
                 itemAtIndex: index,
                 onList: listName,
-                newText: titleText,
-                newNotes: notes
+                with: ReminderUpdate(title: titleText, notes: notes)
             )
             print("Edited: \(Formatter.format(updated))")
         }

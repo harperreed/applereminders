@@ -270,23 +270,25 @@ public actor RemindersStore {
         return mapReminder(ekReminder)
     }
 
-    // MARK: - Editing Reminders
+    // MARK: - Updating Reminders
 
-    /// Edits the title and/or notes of an existing reminder.
+    /// Applies a partial update to an existing reminder.
+    ///
+    /// Only the fields present in `update` change. The double-optional
+    /// `update.dueDate` distinguishes "leave alone" (`nil`) from "clear"
+    /// (`.some(nil)`) from "set" (`.some(date)`).
     ///
     /// - Parameters:
-    ///   - itemAtIndex: An integer index (as a string) or an external identifier.
+    ///   - itemAtIndex: An integer index (as a string) or a stable identifier.
     ///   - listName: The name of the list containing the reminder.
-    ///   - newText: A new title, or `nil` to leave unchanged.
-    ///   - newNotes: New notes, or `nil` to leave unchanged.
-    ///   - includeCompleted: Whether to include completed reminders when resolving the index.
-    ///   - onlyCompleted: If `true`, only completed reminders are considered when resolving the index.
+    ///   - update: The fields to change.
+    ///   - includeCompleted: Whether completed reminders participate in index resolution.
+    ///   - onlyCompleted: If `true`, only completed reminders are considered.
     /// - Returns: The updated `ReminderItem`.
-    public func edit(
+    public func update(
         itemAtIndex: String,
         onList listName: String,
-        newText: String? = nil,
-        newNotes: String? = nil,
+        with update: ReminderUpdate,
         includeCompleted: Bool = false,
         onlyCompleted: Bool = false
     ) async throws -> ReminderItem {
@@ -298,18 +300,44 @@ public actor RemindersStore {
         )
         let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
 
-        if let newText {
-            ekReminder.title = newText
+        if let title = update.title {
+            ekReminder.title = title
         }
-        if let newNotes {
-            ekReminder.notes = newNotes
+        if let notes = update.notes {
+            ekReminder.notes = notes
+        }
+        if let priority = update.priority {
+            ekReminder.priority = priority.eventKitValue
+        }
+        if let newListName = update.listName {
+            ekReminder.calendar = try resolveCalendar(named: newListName)
+        }
+        if let isCompleted = update.isCompleted {
+            ekReminder.isCompleted = isCompleted
+            ekReminder.completionDate = isCompleted ? Date() : nil
+        }
+        if let dueDateChange = update.dueDate {
+            // Alarms track the due date; clear stale ones on any due-date change.
+            for alarm in ekReminder.alarms ?? [] {
+                ekReminder.removeAlarm(alarm)
+            }
+            if let newDate = dueDateChange {
+                ekReminder.dueDateComponents = calendarComponents(from: newDate)
+                let hour = calendar.component(.hour, from: newDate)
+                let minute = calendar.component(.minute, from: newDate)
+                if hour != 0 || minute != 0 {
+                    ekReminder.addAlarm(EKAlarm(absoluteDate: newDate))
+                }
+            } else {
+                ekReminder.dueDateComponents = nil
+            }
         }
 
         do {
             try backend.saveReminder(ekReminder, commit: true)
         } catch {
             throw RemindersError.operationFailed(
-                "Failed to edit reminder: \(error.localizedDescription)"
+                "Failed to update reminder: \(error.localizedDescription)"
             )
         }
 

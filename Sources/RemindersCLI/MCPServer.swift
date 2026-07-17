@@ -822,11 +822,10 @@ actor MCPServer {
         let newNotes = params["notes"]?.stringValue()
 
         do {
-            let updated = try await store.edit(
+            let updated = try await store.update(
                 itemAtIndex: index,
                 onList: listName,
-                newText: newTitle,
-                newNotes: newNotes
+                with: ReminderUpdate(title: newTitle, notes: newNotes)
             )
             let text = prettyEncodeJSON(updated)
             return .success(text)
