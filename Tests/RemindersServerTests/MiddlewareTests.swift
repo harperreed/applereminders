@@ -134,15 +134,13 @@ struct MiddlewareTests {
         }
         let app = Application(router: router)
         try await app.test(.router) { client in
-            // The client sees an error status; we don't assert which one,
-            // only that the log captured something.
-            try await client.execute(uri: "/boom", method: .get) { _ in }
+            try await client.execute(uri: "/boom", method: .get) { response in
+                #expect(response.status == .serviceUnavailable)
+            }
         }
         let line = try #require(box.lines.first, "expected exactly one log line for the throwing request")
         #expect(line.contains("GET"))
         #expect(line.contains("/boom"))
-        // Must contain a numeric status code: any 3-digit number suffices.
-        let hasStatus = line.range(of: #"\b\d{3}\b"#, options: .regularExpression) != nil
-        #expect(hasStatus)
+        #expect(line.contains("503"))
     }
 }

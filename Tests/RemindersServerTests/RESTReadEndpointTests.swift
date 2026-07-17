@@ -64,6 +64,7 @@ struct RESTReadEndpointTests {
         let app = makeTestApp(store: store)
         try await app.test(.router) { client in
             try await client.execute(uri: "/api/reminders?list=Chores", method: .get, headers: authHeaders) { response in
+                #expect(response.status == .ok)
                 let items = try decodeBody([ReminderItem].self, from: response)
                 #expect(items.map(\.title) == ["Sweep"])
             }
@@ -92,14 +93,17 @@ struct RESTReadEndpointTests {
         let app = makeTestApp(store: store)
         try await app.test(.router) { client in
             try await client.execute(uri: "/api/reminders?completed=all", method: .get, headers: authHeaders) { response in
+                #expect(response.status == .ok)
                 let items = try decodeBody([ReminderItem].self, from: response)
                 #expect(items.map(\.title).sorted() == ["Closed", "Open"])
             }
             try await client.execute(uri: "/api/reminders?completed=only", method: .get, headers: authHeaders) { response in
+                #expect(response.status == .ok)
                 let items = try decodeBody([ReminderItem].self, from: response)
                 #expect(items.map(\.title) == ["Closed"])
             }
         }
+        #expect(backend.lastFetchKind == .completed)
     }
 
     @Test func invalidCompletedValueIs400() async throws {

@@ -311,12 +311,19 @@ struct RESTWriteEndpointTests {
         }
     }
 
-    @Test func completeAndDeleteUnknownIDsAre404() async throws {
+    @Test func completionAndDeleteUnknownIDsAre404() async throws {
         let (_, store) = makeTestStore()
         let app = makeTestApp(store: store)
         try await app.test(.router) { client in
             try await client.execute(
                 uri: "/api/reminders/no-such-id/complete",
+                method: .post,
+                headers: authHeaders
+            ) { response in
+                #expect(response.status == .notFound)
+            }
+            try await client.execute(
+                uri: "/api/reminders/no-such-id/uncomplete",
                 method: .post,
                 headers: authHeaders
             ) { response in
@@ -360,6 +367,7 @@ struct RESTWriteEndpointTests {
                 method: .post,
                 headers: authHeaders
             ) { response in
+                #expect(response.status == .ok)
                 let item = try decodeBody(ReminderItem.self, from: response)
                 #expect(!item.isCompleted)
             }

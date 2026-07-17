@@ -97,6 +97,7 @@ struct MCPOverHTTPTests {
                 headers: authHeaders,
                 body: ByteBuffer(string: #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
             ) { response in
+                #expect(response.status == .ok)
                 #expect(String(buffer: response.body).contains("show_lists"))
             }
             let call = #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"show_lists","arguments":{}}}"#

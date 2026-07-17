@@ -84,7 +84,7 @@ public actor RemindersStore {
     /// process-per-invocation and does not need this.
     ///
     /// The closure captures only the `Sendable` backend, not `self`, so it can run
-    /// off-actor without entering the actor's executor — safe here because the backend
+    /// off-actor without entering the actor's executor; safe here because the backend
     /// is documented thread-safe.
     ///
     /// The observer is retained for the process lifetime; no removal API is provided
