@@ -10,11 +10,11 @@ public let supportedDateFormats = "today, tomorrow, next week, yyyy-MM-dd, yyyy-
 /// Parses a user-supplied date string into a `Date`.
 ///
 /// Supported formats (tried in order):
-/// - `"today"` / `"tomorrow"` — midnight of the relevant day
-/// - `"yyyy-MM-dd HH:mm"` — full date and time
-/// - `"yyyy-MM-dd"` — date only (midnight)
-/// - `"MM/dd/yyyy"` — US date format
-/// - `"MM/dd"` — month and day in the current year
+/// - `"today"` / `"tomorrow"`: midnight of the relevant day
+/// - `"yyyy-MM-dd HH:mm"`: full date and time
+/// - `"yyyy-MM-dd"`: date only (midnight)
+/// - `"MM/dd/yyyy"`: US date format
+/// - `"MM/dd"`: month and day in the current year
 public func parseDate(_ string: String) -> Date? {
     let trimmed = string.trimmingCharacters(in: .whitespaces).lowercased()
     let calendar = Calendar.current

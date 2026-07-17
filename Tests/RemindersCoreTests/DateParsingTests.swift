@@ -170,7 +170,7 @@ struct FilterByDueDateTests {
             makeReminder(id: "soon", title: "Soon", dueDate: inTwoDays),
             makeReminder(id: "later", title: "Later", dueDate: inTenDays),
         ]
-        // Filter for "next week" — should include the 2-day-out item but not the 10-day-out item
+        // Filter for "next week"; should include the 2-day-out item but not the 10-day-out item
         let result = filterByDueDate(reminders, dueDate: parseDate("next week"), includeOverdue: false)
         #expect(result.count == 1)
         #expect(result[0].id == "soon")
