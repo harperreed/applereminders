@@ -4,8 +4,7 @@
 import Foundation
 import Testing
 
-@testable import reminders
-import RemindersCore
+@testable import RemindersCore
 
 // MARK: - parseDate Tests
 

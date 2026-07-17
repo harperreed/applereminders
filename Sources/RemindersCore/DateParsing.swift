@@ -1,12 +1,11 @@
-// ABOUTME: Date parsing and due-date filtering helpers for the CLI layer.
-// ABOUTME: Supports multiple human-friendly date formats and overdue filtering.
+// ABOUTME: Date parsing and due-date filtering helpers shared by the CLI, MCP, and REST surfaces.
+// ABOUTME: Supports multiple human-friendly date formats and due-window filtering.
 
 import Foundation
-import RemindersCore
 
 /// Single source of truth for the date formats accepted by `parseDate`, in the order tried.
 /// Every error message that rejects a date string must reference this list.
-let supportedDateFormats = "today, tomorrow, next week, yyyy-MM-dd, yyyy-MM-dd HH:mm, MM/dd/yyyy, MM/dd"
+public let supportedDateFormats = "today, tomorrow, next week, yyyy-MM-dd, yyyy-MM-dd HH:mm, MM/dd/yyyy, MM/dd"
 
 /// Parses a user-supplied date string into a `Date`.
 ///
@@ -16,7 +15,7 @@ let supportedDateFormats = "today, tomorrow, next week, yyyy-MM-dd, yyyy-MM-dd H
 /// - `"yyyy-MM-dd"` — date only (midnight)
 /// - `"MM/dd/yyyy"` — US date format
 /// - `"MM/dd"` — month and day in the current year
-func parseDate(_ string: String) -> Date? {
+public func parseDate(_ string: String) -> Date? {
     let trimmed = string.trimmingCharacters(in: .whitespaces).lowercased()
     let calendar = Calendar.current
 
@@ -72,7 +71,7 @@ func parseDate(_ string: String) -> Date? {
 ///   - dueAfter: Lower bound (inclusive from the start of that day), or `nil` for no lower bound.
 ///   - calendar: Calendar used to resolve day boundaries. Defaults to `.current`.
 /// - Returns: The filtered array of reminders.
-func filterByDueWindow(
+public func filterByDueWindow(
     _ reminders: [ReminderItem],
     dueBefore: Date?,
     dueAfter: Date?,
@@ -112,7 +111,7 @@ func filterByDueWindow(
 ///   - includeOverdue: When `true` alongside a `dueDate` filter, also includes reminders
 ///     whose due date is in the past (before today).
 /// - Returns: The filtered array of reminders.
-func filterByDueDate(
+public func filterByDueDate(
     _ reminders: [ReminderItem],
     dueDate: Date?,
     includeOverdue: Bool
