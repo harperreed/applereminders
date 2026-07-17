@@ -251,23 +251,7 @@ public actor RemindersStore {
             onlyCompleted: onlyCompleted
         )
         let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
-
-        ekReminder.isCompleted = complete
-        if complete {
-            ekReminder.completionDate = Date()
-        } else {
-            ekReminder.completionDate = nil
-        }
-
-        do {
-            try backend.saveReminder(ekReminder, commit: true)
-        } catch {
-            throw RemindersError.operationFailed(
-                "Failed to update completion status: \(error.localizedDescription)"
-            )
-        }
-
-        return mapReminder(ekReminder)
+        return try applyCompletion(complete, to: ekReminder)
     }
 
     // MARK: - Updating Reminders
@@ -299,7 +283,59 @@ public actor RemindersStore {
             onlyCompleted: onlyCompleted
         )
         let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
+        return try applyAndSave(update, to: ekReminder)
+    }
 
+    // MARK: - Deleting Reminders
+
+    /// Deletes a reminder from a list.
+    ///
+    /// - Parameters:
+    ///   - itemAtIndex: An integer index (as a string) or an external identifier.
+    ///   - listName: The name of the list containing the reminder.
+    ///   - includeCompleted: Whether to include completed reminders when resolving the index.
+    ///   - onlyCompleted: If `true`, only completed reminders are considered when resolving the index.
+    /// - Returns: A snapshot of the deleted reminder, captured before removal.
+    public func delete(
+        itemAtIndex: String,
+        onList listName: String,
+        includeCompleted: Bool = false,
+        onlyCompleted: Bool = false
+    ) async throws -> ReminderItem {
+        let targetCalendar = try resolveCalendar(named: listName)
+        let filtered = try await fetchFilteredEKReminders(
+            on: [targetCalendar],
+            includeCompleted: includeCompleted,
+            onlyCompleted: onlyCompleted
+        )
+        let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
+        return try removeAndSnapshot(ekReminder)
+    }
+
+    // MARK: - Shared Mutation Helpers
+
+    /// Sets the completion flag (and matching completion date), saves, and maps.
+    private func applyCompletion(_ complete: Bool, to ekReminder: EKReminder) throws -> ReminderItem {
+        ekReminder.isCompleted = complete
+        if complete {
+            ekReminder.completionDate = Date()
+        } else {
+            ekReminder.completionDate = nil
+        }
+
+        do {
+            try backend.saveReminder(ekReminder, commit: true)
+        } catch {
+            throw RemindersError.operationFailed(
+                "Failed to update completion status: \(error.localizedDescription)"
+            )
+        }
+
+        return mapReminder(ekReminder)
+    }
+
+    /// Applies the fields present in `update` to `ekReminder`, saves, and maps.
+    private func applyAndSave(_ update: ReminderUpdate, to ekReminder: EKReminder) throws -> ReminderItem {
         if let title = update.title {
             ekReminder.title = title
         }
@@ -344,30 +380,8 @@ public actor RemindersStore {
         return mapReminder(ekReminder)
     }
 
-    // MARK: - Deleting Reminders
-
-    /// Deletes a reminder from a list.
-    ///
-    /// - Parameters:
-    ///   - itemAtIndex: An integer index (as a string) or an external identifier.
-    ///   - listName: The name of the list containing the reminder.
-    ///   - includeCompleted: Whether to include completed reminders when resolving the index.
-    ///   - onlyCompleted: If `true`, only completed reminders are considered when resolving the index.
-    /// - Returns: A snapshot of the deleted reminder, captured before removal.
-    public func delete(
-        itemAtIndex: String,
-        onList listName: String,
-        includeCompleted: Bool = false,
-        onlyCompleted: Bool = false
-    ) async throws -> ReminderItem {
-        let targetCalendar = try resolveCalendar(named: listName)
-        let filtered = try await fetchFilteredEKReminders(
-            on: [targetCalendar],
-            includeCompleted: includeCompleted,
-            onlyCompleted: onlyCompleted
-        )
-        let (ekReminder, _) = try resolveReminder(from: filtered, at: itemAtIndex)
-
+    /// Snapshots the reminder, removes it, and returns the snapshot.
+    private func removeAndSnapshot(_ ekReminder: EKReminder) throws -> ReminderItem {
         // Snapshot before removal: EventKit invalidates the object once it is deleted.
         let deleted = mapReminder(ekReminder)
 
@@ -380,6 +394,32 @@ public actor RemindersStore {
         }
 
         return deleted
+    }
+
+    // MARK: - By-ID Operations (REST surface)
+
+    /// Fetches a single reminder by identifier, searching every list.
+    public func reminder(byID id: String) async throws -> ReminderItem {
+        let ekReminder = try await fetchEKReminder(byID: id)
+        return mapReminder(ekReminder)
+    }
+
+    /// Applies a partial update to the reminder with the given identifier.
+    public func update(byID id: String, with update: ReminderUpdate) async throws -> ReminderItem {
+        let ekReminder = try await fetchEKReminder(byID: id)
+        return try applyAndSave(update, to: ekReminder)
+    }
+
+    /// Marks the reminder with the given identifier complete or incomplete.
+    public func setCompleted(byID id: String, completed: Bool) async throws -> ReminderItem {
+        let ekReminder = try await fetchEKReminder(byID: id)
+        return try applyCompletion(completed, to: ekReminder)
+    }
+
+    /// Deletes the reminder with the given identifier and returns its snapshot.
+    public func delete(byID id: String) async throws -> ReminderItem {
+        let ekReminder = try await fetchEKReminder(byID: id)
+        return try removeAndSnapshot(ekReminder)
     }
 
     // MARK: - Private Types
@@ -438,16 +478,38 @@ public actor RemindersStore {
             return (reminders[index], index)
         }
 
-        // Accept either identifier: mapReminder emits the external identifier
-        // when EventKit has assigned one and the item identifier otherwise, so
-        // both must round-trip back to the same reminder.
         guard let matchIndex = reminders.firstIndex(where: {
-            $0.calendarItemExternalIdentifier == indexOrID
-                || $0.calendarItemIdentifier == indexOrID
+            reminderMatches($0, identifier: indexOrID)
         }) else {
             throw RemindersError.reminderNotFound(indexOrID)
         }
         return (reminders[matchIndex], matchIndex)
+    }
+
+    /// Whether `identifier` names this reminder. Accepts either identifier:
+    /// mapReminder emits the external identifier when EventKit has assigned
+    /// one and the item identifier otherwise, so both must round-trip back
+    /// to the same reminder.
+    private func reminderMatches(_ reminder: EKReminder, identifier: String) -> Bool {
+        reminder.calendarItemExternalIdentifier == identifier
+            || reminder.calendarItemIdentifier == identifier
+    }
+
+    /// Fetches a reminder by identifier across all lists, completed included.
+    ///
+    /// Identifiers only: unlike index resolution, a purely numeric string here
+    /// is an identifier that matches nothing, never a position. REST ids must
+    /// not alias list indexes.
+    private func fetchEKReminder(byID id: String) async throws -> EKReminder {
+        let all = try await fetchFilteredEKReminders(
+            on: nil,
+            includeCompleted: true,
+            onlyCompleted: false
+        )
+        guard let match = all.first(where: { reminderMatches($0, identifier: id) }) else {
+            throw RemindersError.reminderNotFound(id)
+        }
+        return match
     }
 
     // MARK: - Private Helpers (Mapping)
