@@ -48,6 +48,7 @@ swift test
 
 ## Architecture
 
-- `RemindersCore` — Actor-based EventKit wrapper, no semaphores
-- `RemindersCLI` — swift-argument-parser CLI + MCP server in one binary
+- `RemindersCore` - Actor-based EventKit wrapper, no semaphores
+- `RemindersCLI` - swift-argument-parser CLI + MCP server in one binary
+- `RemindersTestSupport` - shared in-memory fake of the EventKit seam; tests run without TCC
 - Single binary: `reminders`
