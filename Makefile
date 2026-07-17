@@ -7,7 +7,7 @@ BUILD_DIR = .build
 RELEASE_BIN = $(BUILD_DIR)/release/reminders
 DEBUG_BIN = $(BUILD_DIR)/debug/reminders
 
-.PHONY: all build release test install uninstall clean lint tag
+.PHONY: all build release test check install uninstall clean lint run tag
 
 all: build
 
@@ -19,6 +19,8 @@ release:
 
 test:
 	swift test
+
+check: build test
 
 install: release
 	install -d $(INSTALL_DIR)

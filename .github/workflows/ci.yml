@@ -1,0 +1,23 @@
+# ABOUTME: Continuous integration — builds and tests every push to main and every PR.
+# ABOUTME: Runs on macOS 15 for the Swift 6 toolchain (matches release.yml).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
