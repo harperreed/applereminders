@@ -121,7 +121,7 @@ struct RESTReadEndpointTests {
         try await app.test(.router) { client in
             try await client.execute(uri: "/api/reminders?list=Nope", method: .get, headers: authHeaders) { response in
                 #expect(response.status == .notFound)
-                #expect(String(buffer: response.body).contains("List not found"))
+                #expect(String(buffer: response.body).contains("No reminder list found"))
             }
         }
     }
