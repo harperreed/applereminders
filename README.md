@@ -1,10 +1,10 @@
 # reminders-mcp
 
-CLI for macOS Reminders plus an MCP server, in one binary. A drop-in replacement for
-[keith/reminders-cli](https://github.com/keith/reminders-cli) built on EventKit with
-Swift 6 async/await (actor-isolated, no semaphores) that also speaks the
-Model Context Protocol so LLM clients — Claude Code, Claude Desktop, anything
-MCP-capable — can manage your reminders.
+One binary that is both a CLI for macOS Reminders and an MCP server. It is a
+drop-in replacement for [keith/reminders-cli](https://github.com/keith/reminders-cli),
+rebuilt on EventKit with Swift 6 async/await (actors, no semaphores), and it
+speaks the Model Context Protocol, so Claude Code, Claude Desktop, or any other
+MCP client can manage your reminders too.
 
 ## Install
 
@@ -14,8 +14,8 @@ MCP-capable — can manage your reminders.
 brew install harperreed/tap/applereminders
 ```
 
-The binary installs as `reminders`. Heads up: keith/reminders-cli also installs a
-binary named `reminders` — don't install both.
+The binary installs as `reminders`. Heads up: keith/reminders-cli installs a
+binary with the same name, so pick one or the other.
 
 If macOS Gatekeeper blocks the downloaded binary:
 
@@ -33,15 +33,18 @@ make install   # release build into /usr/local/bin (override with PREFIX=...)
 
 ## Reminders access (TCC)
 
-The first command that touches your reminders triggers the macOS permission prompt.
-The grant is recorded against the app that launched the process — your terminal
-(Terminal.app, iTerm2, Ghostty, …) for CLI use, or the MCP host app for server use.
+The first command that touches your reminders triggers the macOS permission
+prompt. macOS records the grant against the app that launched the process: your
+terminal (Terminal.app, iTerm2, Ghostty, whatever you use) for CLI use, or the
+MCP host app for server use.
 
-- Manage grants: System Settings → Privacy & Security → Reminders
-- Reset if stuck: `tccutil reset Reminders` (every app re-prompts on next use)
+Manage grants in System Settings under Privacy & Security > Reminders. If a
+grant gets stuck, `tccutil reset Reminders` clears every app's grant and each
+one re-prompts on next use.
 
-If access is denied, CLI commands exit with an error on stderr; MCP tool calls
-return an error result telling the model how to fix it — the server itself stays up.
+If access is denied, CLI commands exit with an error on stderr. MCP tool calls
+return an error result that tells the model how to fix it, and the server
+stays up.
 
 ## CLI usage
 
@@ -63,24 +66,27 @@ reminders new-list Projects
 reminders new-list Projects --source iCloud
 ```
 
-Put options (`-d`, `-p`, `-n`) **before** the title words in `add` and `edit` —
-everything after the first non-option word becomes part of the title.
+Put options (`-d`, `-p`, `-n`) before the title words in `add` and `edit`.
+Everything after the first word that is not an option becomes part of the title.
 
 ### Targeting a reminder: index vs id
 
-`complete`, `uncomplete`, `delete`, and `edit` accept either form in the index slot:
+`complete`, `uncomplete`, `delete`, and `edit` take either a zero-based index
+from `show` or a stable id in the same argument slot.
 
-- **Zero-based index** from `show` — fragile: positions shift as reminders change.
-  `complete`/`delete`/`edit` count the *incomplete* view; `uncomplete` counts the
-  *completed* view (`show <list> --only-completed`).
-- **Stable id** — the `id` field in `show <list> --format json`. Survives
-  reordering; preferred for scripts.
+Indexes are positional and shift as reminders change. `complete`, `delete`, and
+`edit` count the incomplete view; `uncomplete` counts the completed view
+(`show <list> --only-completed`).
+
+The stable id is the `id` field in `show <list> --format json`. It survives
+reordering, which makes it the better choice for scripts.
 
 ### Dates
 
 `--due-date` / `-d` accepts: `today`, `tomorrow`, `next week`, `yyyy-MM-dd`,
 `yyyy-MM-dd HH:mm`, `MM/dd/yyyy`, `MM/dd`. A time component also sets an alarm
-at that time. Unparseable dates are rejected up front.
+at that time. The commands reject dates they cannot parse instead of silently
+dropping the filter.
 
 ### JSON output
 
@@ -124,16 +130,18 @@ Any other MCP client:
 | `edit_reminder` | Change title and/or notes |
 | `create_list` | Create a new reminder list |
 
-Every reminder object carries a stable `id` — models should pass it back to the
-mutating tools instead of positional indexes. The server observes EventKit change
-notifications, so edits made in the Reminders app show up without a restart.
+Every reminder object includes a stable `id`, and models should pass that back
+to the mutating tools instead of a positional index. The server watches
+EventKit change notifications, so edits made in the Reminders app show up
+without a restart.
 
 ## Compatibility with keith/reminders-cli
 
-Core command names and positional index semantics match upstream. Deliberate
-additions: `--mcp` mode, stable-id addressing, `edit`, `--include-completed` /
-`--only-completed`, `--due-date` filtering. Confirmation strings differ slightly —
-check first if you script against exact output.
+Core command names and positional index semantics match upstream. The
+deliberate additions are `--mcp` mode, stable-id addressing, `edit`,
+`--include-completed` / `--only-completed`, and `--due-date` filtering.
+Confirmation strings differ slightly, so check the actual output before you
+script against it.
 
 ## Development
 
@@ -144,9 +152,14 @@ make test     # test suite only
 bash scripts/mcp-freshness-smoke.sh   # e2e freshness check (needs TCC grant)
 ```
 
-Architecture: `RemindersCore` (actor wrapping `EKEventStore`) + a `reminders`
-executable (swift-argument-parser CLI and MCP server in one). Agent-facing notes
-live in [CLAUDE.md](CLAUDE.md).
+The package has two targets: `RemindersCore`, an actor that wraps
+`EKEventStore`, and the `reminders` executable, which holds the
+swift-argument-parser CLI and the MCP server. Notes for coding agents live in
+[CLAUDE.md](CLAUDE.md).
+
+## Author
+
+Harper Reed ([harper@modest.com](mailto:harper@modest.com))
 
 ## License
 
