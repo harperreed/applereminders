@@ -716,29 +716,11 @@ actor MCPServer {
             )
         }
 
-        let dueBefore: Date?
-        if let boundString = params["due_before"]?.stringValue() {
-            guard let parsed = parseDate(boundString) else {
-                return .error(
-                    "Invalid due_before \"\(boundString)\". Supported formats: \(supportedDateFormats)."
-                )
-            }
-            dueBefore = parsed
-        } else {
-            dueBefore = nil
-        }
+        let (dueBefore, dueBeforeError) = parseDueBound("due_before", from: params)
+        if let err = dueBeforeError { return err }
 
-        let dueAfter: Date?
-        if let boundString = params["due_after"]?.stringValue() {
-            guard let parsed = parseDate(boundString) else {
-                return .error(
-                    "Invalid due_after \"\(boundString)\". Supported formats: \(supportedDateFormats)."
-                )
-            }
-            dueAfter = parsed
-        } else {
-            dueAfter = nil
-        }
+        let (dueAfter, dueAfterError) = parseDueBound("due_after", from: params)
+        if let err = dueAfterError { return err }
 
         do {
             let reminders = try await store.reminders(
@@ -768,29 +750,11 @@ actor MCPServer {
             )
         }
 
-        let dueBefore: Date?
-        if let boundString = params["due_before"]?.stringValue() {
-            guard let parsed = parseDate(boundString) else {
-                return .error(
-                    "Invalid due_before \"\(boundString)\". Supported formats: \(supportedDateFormats)."
-                )
-            }
-            dueBefore = parsed
-        } else {
-            dueBefore = nil
-        }
+        let (dueBefore, dueBeforeError) = parseDueBound("due_before", from: params)
+        if let err = dueBeforeError { return err }
 
-        let dueAfter: Date?
-        if let boundString = params["due_after"]?.stringValue() {
-            guard let parsed = parseDate(boundString) else {
-                return .error(
-                    "Invalid due_after \"\(boundString)\". Supported formats: \(supportedDateFormats)."
-                )
-            }
-            dueAfter = parsed
-        } else {
-            dueAfter = nil
-        }
+        let (dueAfter, dueAfterError) = parseDueBound("due_after", from: params)
+        if let err = dueAfterError { return err }
 
         do {
             let reminders = try await store.reminders(
@@ -1023,6 +987,23 @@ actor MCPServer {
     }
 
     // MARK: - Argument Helpers
+
+    /// Parses an optional due-bound parameter (e.g. `due_before` or `due_after`) from the tool
+    /// params dictionary. Returns `(nil, nil)` when the key is absent, `(date, nil)` when present
+    /// and parseable, or `(nil, toolError)` when the value cannot be parsed — with an error message
+    /// that names the key and the supported formats.
+    private static func parseDueBound(
+        _ key: String,
+        from params: [String: JSONValue]
+    ) -> (date: Date?, error: MCPToolResult?) {
+        guard let boundString = params[key]?.stringValue() else {
+            return (nil, nil)
+        }
+        guard let parsed = parseDate(boundString) else {
+            return (nil, .error("Invalid \(key) \"\(boundString)\". Supported formats: \(supportedDateFormats)."))
+        }
+        return (parsed, nil)
+    }
 
     /// Extracts the `index` argument as a string, accepting both integer and string JSON values.
     private static func extractIndex(from arguments: [String: JSONValue]) -> String? {
