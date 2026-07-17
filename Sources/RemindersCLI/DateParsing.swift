@@ -60,6 +60,47 @@ func parseDate(_ string: String) -> Date? {
     return nil
 }
 
+/// Filters reminders to a day-granular due-date window.
+///
+/// `dueBefore` keeps reminders due on or before that day; `dueAfter` keeps
+/// reminders due on or after that day. Both together form a window. Reminders
+/// without a due date are excluded whenever a bound is present.
+///
+/// - Parameters:
+///   - reminders: The reminders to filter.
+///   - dueBefore: Upper bound (inclusive of that whole day), or `nil` for no upper bound.
+///   - dueAfter: Lower bound (inclusive from the start of that day), or `nil` for no lower bound.
+///   - calendar: Calendar used to resolve day boundaries. Defaults to `.current`.
+/// - Returns: The filtered array of reminders.
+func filterByDueWindow(
+    _ reminders: [ReminderItem],
+    dueBefore: Date?,
+    dueAfter: Date?,
+    calendar: Calendar = .current
+) -> [ReminderItem] {
+    guard dueBefore != nil || dueAfter != nil else {
+        return reminders
+    }
+
+    let upperBound = dueBefore.flatMap {
+        calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: $0))
+    }
+    let lowerBound = dueAfter.map { calendar.startOfDay(for: $0) }
+
+    return reminders.filter { reminder in
+        guard let due = reminder.dueDate else {
+            return false
+        }
+        if let upperBound, due >= upperBound {
+            return false
+        }
+        if let lowerBound, due < lowerBound {
+            return false
+        }
+        return true
+    }
+}
+
 /// Filters reminders by an optional due date and/or overdue status.
 ///
 /// Parsing happens at the call sites (all of which validate user input up

@@ -361,7 +361,8 @@ actor MCPServer {
                     + "Returns a JSON array of reminder objects with id, title, notes, "
                     + "isCompleted, completionDate, priority, dueDate, listID, and listName "
                     + "fields. Pass a reminder's id to complete_reminder, uncomplete_reminder, "
-                    + "delete_reminder, or edit_reminder to target it reliably.",
+                    + "delete_reminder, or edit_reminder to target it reliably. "
+                    + "Use due_before and/or due_after (day-granular) to filter by due date.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -382,6 +383,19 @@ actor MCPServer {
                                 + "Cannot be used together with include_completed.",
                             enum: nil
                         ),
+                        "due_before": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or before this day. "
+                                + "Accepts: 'today', 'tomorrow', 'next week', 'yyyy-MM-dd', "
+                                + "'yyyy-MM-dd HH:mm', 'MM/dd/yyyy', or 'MM/dd'.",
+                            enum: nil
+                        ),
+                        "due_after": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or after this day. "
+                                + "Accepts the same formats as due_before.",
+                            enum: nil
+                        ),
                     ],
                     required: ["list"]
                 )
@@ -392,7 +406,8 @@ actor MCPServer {
                     + "list name. By default only returns incomplete reminders. "
                     + "Useful for getting a full overview of all pending tasks. "
                     + "Returns the same JSON reminder objects as show_reminders; each object's "
-                    + "id is a stable identifier accepted by the mutating tools.",
+                    + "id is a stable identifier accepted by the mutating tools. "
+                    + "Use due_before and/or due_after (day-granular) to filter by due date.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -406,6 +421,19 @@ actor MCPServer {
                             type: "boolean",
                             description: "When true, shows only completed reminders. "
                                 + "Cannot be used together with include_completed.",
+                            enum: nil
+                        ),
+                        "due_before": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or before this day. "
+                                + "Accepts: 'today', 'tomorrow', 'next week', 'yyyy-MM-dd', "
+                                + "'yyyy-MM-dd HH:mm', 'MM/dd/yyyy', or 'MM/dd'.",
+                            enum: nil
+                        ),
+                        "due_after": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or after this day. "
+                                + "Accepts the same formats as due_before.",
                             enum: nil
                         ),
                     ],
@@ -688,13 +716,38 @@ actor MCPServer {
             )
         }
 
+        let dueBefore: Date?
+        if let boundString = params["due_before"]?.stringValue() {
+            guard let parsed = parseDate(boundString) else {
+                return .error(
+                    "Invalid due_before \"\(boundString)\". Supported formats: \(supportedDateFormats)."
+                )
+            }
+            dueBefore = parsed
+        } else {
+            dueBefore = nil
+        }
+
+        let dueAfter: Date?
+        if let boundString = params["due_after"]?.stringValue() {
+            guard let parsed = parseDate(boundString) else {
+                return .error(
+                    "Invalid due_after \"\(boundString)\". Supported formats: \(supportedDateFormats)."
+                )
+            }
+            dueAfter = parsed
+        } else {
+            dueAfter = nil
+        }
+
         do {
             let reminders = try await store.reminders(
                 inList: listName,
                 includeCompleted: includeCompleted || onlyCompleted,
                 onlyCompleted: onlyCompleted
             )
-            let text = prettyEncodeJSON(reminders)
+            let filtered = filterByDueWindow(reminders, dueBefore: dueBefore, dueAfter: dueAfter)
+            let text = prettyEncodeJSON(filtered)
             return .success(text)
         } catch {
             return .error("Failed to fetch reminders: \(error.localizedDescription)")
@@ -715,12 +768,37 @@ actor MCPServer {
             )
         }
 
+        let dueBefore: Date?
+        if let boundString = params["due_before"]?.stringValue() {
+            guard let parsed = parseDate(boundString) else {
+                return .error(
+                    "Invalid due_before \"\(boundString)\". Supported formats: \(supportedDateFormats)."
+                )
+            }
+            dueBefore = parsed
+        } else {
+            dueBefore = nil
+        }
+
+        let dueAfter: Date?
+        if let boundString = params["due_after"]?.stringValue() {
+            guard let parsed = parseDate(boundString) else {
+                return .error(
+                    "Invalid due_after \"\(boundString)\". Supported formats: \(supportedDateFormats)."
+                )
+            }
+            dueAfter = parsed
+        } else {
+            dueAfter = nil
+        }
+
         do {
             let reminders = try await store.reminders(
                 includeCompleted: includeCompleted || onlyCompleted,
                 onlyCompleted: onlyCompleted
             )
-            let text = prettyEncodeJSON(reminders)
+            let filtered = filterByDueWindow(reminders, dueBefore: dueBefore, dueAfter: dueAfter)
+            let text = prettyEncodeJSON(filtered)
             return .success(text)
         } catch {
             return .error("Failed to fetch reminders: \(error.localizedDescription)")

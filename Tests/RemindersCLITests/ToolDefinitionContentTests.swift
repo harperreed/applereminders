@@ -78,4 +78,15 @@ struct ToolDefinitionContentTests {
         #expect(properties["include_completed"] != nil)
         #expect(!delete.description.contains("Only incomplete reminders can be targeted"))
     }
+
+    @Test("show tools advertise due_before and due_after")
+    func showToolsDueWindowParams() throws {
+        let definitions = MCPServer.buildToolDefinitions()
+        for name in ["show_reminders", "show_all_reminders"] {
+            let tool = try #require(definitions.first(where: { $0.name == name }))
+            let properties = try #require(tool.inputSchema.properties)
+            #expect(properties["due_before"] != nil, "\(name) missing due_before")
+            #expect(properties["due_after"] != nil, "\(name) missing due_after")
+        }
+    }
 }
