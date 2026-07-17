@@ -40,11 +40,25 @@ struct ToolRegistry: Sendable {
 /// responses to stdout. Each response is a single line of JSON followed by a newline.
 /// Diagnostic logging goes to stderr so it does not interfere with the protocol stream.
 actor MCPServer {
+    /// Writes one complete response line. Injectable so tests can capture output.
+    typealias OutputWriter = @Sendable (String) -> Void
+
     private let store: RemindersStore
     private let registry: ToolRegistry
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
-    init(store: RemindersStore) {
+    private let input: AsyncThrowingStream<String, Error>
+    private let output: OutputWriter
+
+    /// - Parameters:
+    ///   - store: The reminders store to serve.
+    ///   - input: Request lines to process. Defaults to stdin.
+    ///   - output: Where response lines go. Defaults to stdout with an immediate flush.
+    init(
+        store: RemindersStore,
+        input: AsyncThrowingStream<String, Error>? = nil,
+        output: OutputWriter? = nil
+    ) {
         self.store = store
         self.decoder = JSONDecoder()
 
@@ -52,20 +66,43 @@ actor MCPServer {
         self.encoder = JSONEncoder()
         self.encoder.outputFormatting = [.sortedKeys]
 
+        self.input = input ?? MCPServer.standardInputLines()
+        self.output = output ?? { line in
+            print(line)
+            fflush(stdout)
+        }
+
         self.registry = MCPServer.buildRegistry(store: store)
+    }
+
+    /// Bridges stdin into a line stream without blocking the cooperative pool.
+    private static func standardInputLines() -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let reader = Task {
+                do {
+                    for try await line in FileHandle.standardInput.bytes.lines {
+                        continuation.yield(line)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in reader.cancel() }
+        }
     }
 
     // MARK: - Main Loop
 
-    /// Runs the server, reading lines from stdin until EOF.
+    /// Runs the server, reading lines from the injected line stream (stdin by default) until EOF.
     ///
-    /// Uses `FileHandle.standardInput.bytes.lines` to avoid blocking the
-    /// cooperative thread pool (unlike `readLine()` which is synchronous).
+    /// Uses an async line stream to avoid blocking the cooperative thread pool
+    /// (unlike `readLine()` which is synchronous).
     func run() async {
         logStderr("reminders-mcp server starting")
 
         do {
-            for try await line in FileHandle.standardInput.bytes.lines {
+            for try await line in input {
                 guard !line.isEmpty else { continue }
 
                 logStderr("recv: \(line)")
@@ -281,10 +318,9 @@ actor MCPServer {
 
     // MARK: - I/O
 
-    /// Writes a single line to stdout and flushes immediately.
-    private nonisolated func writeLine(_ line: String) {
-        print(line)
-        fflush(stdout)
+    /// Writes a single response line through the injected output.
+    private func writeLine(_ line: String) {
+        output(line)
     }
 
     /// Writes a diagnostic message to stderr (never touches stdout).
