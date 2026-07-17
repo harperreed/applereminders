@@ -263,4 +263,36 @@ struct RemindersStoreTests {
         #expect(backend.removedReminders.count == 1)
         #expect(backend.currentReminders.isEmpty)
     }
+
+    // MARK: Predicate selection (fetch narrowing happens in EventKit, not in memory)
+
+    @Test("default fetch asks for the incomplete predicate")
+    func incompletePredicateSelected() async throws {
+        let backend = FakeEventStoreBackend()
+        let cal = backend.addCalendar(named: "Inbox")
+        backend.addReminder(title: "open", in: cal)
+        let store = RemindersStore(backend: backend)
+        _ = try await store.reminders(inList: "Inbox", includeCompleted: false)
+        #expect(backend.lastFetchKind == .incomplete)
+    }
+
+    @Test("onlyCompleted fetch asks for the completed predicate")
+    func completedPredicateSelected() async throws {
+        let backend = FakeEventStoreBackend()
+        let cal = backend.addCalendar(named: "Inbox")
+        backend.addReminder(title: "done", in: cal, isCompleted: true)
+        let store = RemindersStore(backend: backend)
+        _ = try await store.reminders(inList: "Inbox", includeCompleted: true, onlyCompleted: true)
+        #expect(backend.lastFetchKind == .completed)
+    }
+
+    @Test("includeCompleted fetch asks for the general predicate")
+    func allPredicateSelected() async throws {
+        let backend = FakeEventStoreBackend()
+        let cal = backend.addCalendar(named: "Inbox")
+        backend.addReminder(title: "open", in: cal)
+        let store = RemindersStore(backend: backend)
+        _ = try await store.reminders(inList: "Inbox", includeCompleted: true)
+        #expect(backend.lastFetchKind == .all)
+    }
 }

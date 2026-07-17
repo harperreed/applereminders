@@ -510,6 +510,9 @@ public actor RemindersStore {
     /// Unlike `filteredReminders(on:displayOptions:)`, this returns raw `EKReminder` objects
     /// so callers can mutate them (e.g., mark complete, edit, delete).
     ///
+    /// Completion filtering is delegated to EventKit via the appropriate predicate;
+    /// no in-memory filtering is performed after the fetch.
+    ///
     /// - Parameters:
     ///   - calendars: The calendars to fetch from, or `nil` for all.
     ///   - includeCompleted: Whether to include completed reminders. Ignored when `onlyCompleted` is true.
@@ -520,15 +523,15 @@ public actor RemindersStore {
         includeCompleted: Bool,
         onlyCompleted: Bool
     ) async throws -> [EKReminder] {
-        let allReminders = try await fetchReminders(matching: backend.remindersPredicate(in: calendars))
-
+        let predicate: NSPredicate
         if onlyCompleted {
-            return allReminders.filter(\.isCompleted)
+            predicate = backend.completedRemindersPredicate(in: calendars)
         } else if !includeCompleted {
-            return allReminders.filter { !$0.isCompleted }
+            predicate = backend.incompleteRemindersPredicate(in: calendars)
         } else {
-            return allReminders
+            predicate = backend.remindersPredicate(in: calendars)
         }
+        return try await fetchReminders(matching: predicate)
     }
 
     /// Fetches reminders and filters them by the given display options.

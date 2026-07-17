@@ -24,7 +24,15 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
     private var _savedReminders: [EKReminder] = []
     private var _removedReminders: [EKReminder] = []
     private var _lastRequestedCalendars: [EKCalendar]??
+    private var _lastFetchKind: FetchKind?
     private var _refreshCount = 0
+
+    /// Which predicate flavor the store last requested.
+    public enum FetchKind: Sendable, Equatable {
+        case all
+        case incomplete
+        case completed
+    }
 
     public init() {}
 
@@ -54,6 +62,8 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
     public var refreshCount: Int { lock.withLock { _refreshCount } }
     /// All reminders currently stored (post save/remove).
     public var currentReminders: [EKReminder] { lock.withLock { _reminders } }
+    /// The predicate flavor of the most recent fetch.
+    public var lastFetchKind: FetchKind? { lock.withLock { _lastFetchKind } }
 
     // MARK: - Seeding
 
@@ -151,7 +161,26 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
     /// before each `fetchReminders` call. Calling `fetchReminders` without a
     /// prior predicate call returns all reminders (scope is treated as "all").
     public func remindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
-        lock.withLock { _lastRequestedCalendars = calendars }
+        lock.withLock {
+            _lastRequestedCalendars = calendars
+            _lastFetchKind = .all
+        }
+        return NSPredicate(value: true)
+    }
+
+    public func incompleteRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
+        lock.withLock {
+            _lastRequestedCalendars = calendars
+            _lastFetchKind = .incomplete
+        }
+        return NSPredicate(value: true)
+    }
+
+    public func completedRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
+        lock.withLock {
+            _lastRequestedCalendars = calendars
+            _lastFetchKind = .completed
+        }
         return NSPredicate(value: true)
     }
 
@@ -171,11 +200,21 @@ public final class FakeEventStoreBackend: EventStoreBackend, @unchecked Sendable
         completion: @escaping @Sendable ([EKReminder]?) -> Void
     ) {
         let snapshot: [EKReminder] = lock.withLock {
-            guard let scope = _lastRequestedCalendars else { return _reminders }
-            guard let calendars = scope else { return _reminders }
-            return _reminders.filter { reminder in
-                calendars.contains { $0 === reminder.calendar }
+            var result = _reminders
+            if let scope = _lastRequestedCalendars, let calendars = scope {
+                result = result.filter { reminder in
+                    calendars.contains { $0 === reminder.calendar }
+                }
             }
+            switch _lastFetchKind {
+            case .incomplete:
+                result = result.filter { !$0.isCompleted }
+            case .completed:
+                result = result.filter { $0.isCompleted }
+            case .all, nil:
+                break
+            }
+            return result
         }
         completion(snapshot)
     }

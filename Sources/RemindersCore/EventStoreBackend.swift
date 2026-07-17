@@ -33,6 +33,10 @@ public protocol EventStoreBackend: Sendable {
     func removeReminder(_ reminder: EKReminder, commit: Bool) throws
     /// Predicate matching every reminder in the given calendars (nil = all calendars).
     func remindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate
+    /// Predicate matching only incomplete reminders in the given calendars.
+    func incompleteRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate
+    /// Predicate matching only completed reminders in the given calendars.
+    func completedRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate
     /// Runs a reminder fetch. The completion may be invoked on any thread.
     func fetchReminders(
         matching predicate: NSPredicate,
@@ -93,6 +97,22 @@ final class EventKitBackend: EventStoreBackend, @unchecked Sendable {
 
     func remindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
         store.predicateForReminders(in: calendars)
+    }
+
+    func incompleteRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
+        store.predicateForIncompleteReminders(
+            withDueDateStarting: nil,
+            ending: nil,
+            calendars: calendars
+        )
+    }
+
+    func completedRemindersPredicate(in calendars: [EKCalendar]?) -> NSPredicate {
+        store.predicateForCompletedReminders(
+            withCompletionDateStarting: nil,
+            ending: nil,
+            calendars: calendars
+        )
     }
 
     func fetchReminders(
