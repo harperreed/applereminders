@@ -31,7 +31,7 @@ public enum RemindersError: LocalizedError, Sendable, Equatable {
                 + "Please update permissions in System Settings > Privacy & Security > Reminders."
 
         case .listNotFound(let name):
-            return "No reminder list found with the name \"\(name)\". "
+            return "List not found: No reminder list found with the name \"\(name)\". "
                 + "Check your available lists and verify the spelling."
 
         case .reminderNotFound(let identifier):
