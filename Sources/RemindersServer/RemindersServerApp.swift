@@ -3,6 +3,7 @@
 
 import Foundation
 import Hummingbird
+import NIOCore
 import RemindersCore
 
 /// Everything the HTTP server needs to start.
@@ -152,6 +153,38 @@ func buildRouter(
     api.delete("reminders/:id") { _, context -> Response in
         let id = try requiredID(from: context)
         return try jsonResponse(try await store.delete(byID: id))
+    }
+
+    // MCP over HTTP (spec "MCP over HTTP"): stateless, one message per POST.
+    // Constructed with inert stdio seams; the default init would spawn a
+    // stdin-reading task, which a network server must never do.
+    let mcpServer = MCPServer(
+        store: store,
+        input: AsyncThrowingStream<String, Error> { continuation in
+            continuation.finish()
+        },
+        output: { _ in }
+    )
+
+    router.post("mcp") { request, context -> Response in
+        let buffer = try await request.body.collect(upTo: context.maxUploadSize)
+        guard let line = await mcpServer.response(forMessageData: Data(buffer.readableBytesView)) else {
+            // Notifications need no body; the transport answers 202 Accepted.
+            return Response(status: .accepted)
+        }
+        return Response(
+            status: .ok,
+            headers: [.contentType: "application/json"],
+            body: .init(byteBuffer: ByteBuffer(string: line))
+        )
+    }
+
+    router.get("mcp") { _, _ -> Response in
+        Response(status: .methodNotAllowed)
+    }
+
+    router.delete("mcp") { _, _ -> Response in
+        Response(status: .methodNotAllowed)
     }
 
     return router
