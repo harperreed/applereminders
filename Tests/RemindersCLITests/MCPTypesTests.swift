@@ -346,3 +346,29 @@ struct MCPToolResultTests {
         #expect(dict["text"] as? String == "hello")
     }
 }
+
+// MARK: - PropertySchema Union Type Tests
+
+@Suite("PropertySchema union types")
+struct PropertySchemaUnionTests {
+
+    @Test("single type still encodes as a bare string")
+    func singleTypeEncodesAsString() throws {
+        let prop = PropertySchema(type: "string", description: "A field", enum: nil)
+        let data = try JSONEncoder().encode(prop)
+        let dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(dict["type"] as? String == "string")
+    }
+
+    @Test("multiple types encode as a JSON array")
+    func multipleTypesEncodeAsArray() throws {
+        let prop = PropertySchema(
+            types: ["string", "integer"],
+            description: "ID or position",
+            enum: nil
+        )
+        let data = try JSONEncoder().encode(prop)
+        let dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        #expect(dict["type"] as? [String] == ["string", "integer"])
+    }
+}

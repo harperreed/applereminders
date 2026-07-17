@@ -211,10 +211,22 @@ struct JSONSchema: Encodable, Sendable {
 }
 
 /// Schema for a single property within a JSON Schema.
+/// `types` holds one or more JSON Schema types; a single entry encodes as a bare
+/// string (`"type": "string"`), multiple entries as an array (`"type": ["string", "integer"]`).
 struct PropertySchema: Encodable, Sendable {
-    let type: String
+    let types: [String]
     let description: String
     let `enum`: [String]?
+
+    init(type: String, description: String, enum enumValues: [String]?) {
+        self.init(types: [type], description: description, enum: enumValues)
+    }
+
+    init(types: [String], description: String, enum enumValues: [String]?) {
+        self.types = types
+        self.description = description
+        self.enum = enumValues
+    }
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -224,7 +236,11 @@ struct PropertySchema: Encodable, Sendable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(type, forKey: .type)
+        if types.count == 1 {
+            try container.encode(types[0], forKey: .type)
+        } else {
+            try container.encode(types, forKey: .type)
+        }
         try container.encode(description, forKey: .description)
         if let enumValues = self.enum {
             try container.encode(enumValues, forKey: .enum)
