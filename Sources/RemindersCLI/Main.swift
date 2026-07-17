@@ -4,6 +4,7 @@
 import ArgumentParser
 import Foundation
 import RemindersCore
+import RemindersServer
 
 @main
 struct RemindersTool: AsyncParsableCommand {

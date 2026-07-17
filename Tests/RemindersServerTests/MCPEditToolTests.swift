@@ -5,7 +5,7 @@ import Foundation
 import RemindersTestSupport
 import Testing
 
-@testable import reminders
+@testable import RemindersServer
 
 @Suite("MCP edit and delete tool surfaces")
 struct MCPEditToolTests {

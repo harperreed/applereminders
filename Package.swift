@@ -20,10 +20,17 @@ let package = Package(
                 .linkedFramework("EventKit"),
             ]
         ),
+        .target(
+            name: "RemindersServer",
+            dependencies: [
+                "RemindersCore",
+            ]
+        ),
         .executableTarget(
             name: "reminders",
             dependencies: [
                 "RemindersCore",
+                "RemindersServer",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Sources/RemindersCLI",
@@ -47,6 +54,10 @@ let package = Package(
         .testTarget(
             name: "RemindersCoreTests",
             dependencies: ["RemindersCore", "RemindersTestSupport"]
+        ),
+        .testTarget(
+            name: "RemindersServerTests",
+            dependencies: ["RemindersServer", "RemindersTestSupport"]
         ),
         .testTarget(
             name: "RemindersCLITests",

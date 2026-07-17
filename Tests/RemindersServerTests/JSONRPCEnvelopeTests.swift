@@ -4,7 +4,7 @@
 import Foundation
 import Testing
 
-@testable import reminders
+@testable import RemindersServer
 
 @Suite("JSON-RPC envelopes")
 struct JSONRPCEnvelopeTests {

@@ -39,9 +39,9 @@ struct ToolRegistry: Sendable {
 /// An actor-based MCP server that reads JSON-RPC requests from stdin and writes
 /// responses to stdout. Each response is a single line of JSON followed by a newline.
 /// Diagnostic logging goes to stderr so it does not interfere with the protocol stream.
-actor MCPServer {
+public actor MCPServer {
     /// Writes one complete response line. Injectable so tests can capture output.
-    typealias OutputWriter = @Sendable (String) -> Void
+    public typealias OutputWriter = @Sendable (String) -> Void
 
     private let store: RemindersStore
     private let registry: ToolRegistry
@@ -54,7 +54,7 @@ actor MCPServer {
     ///   - store: The reminders store to serve.
     ///   - input: Request lines to process. Defaults to stdin.
     ///   - output: Where response lines go. Defaults to stdout with an immediate flush.
-    init(
+    public init(
         store: RemindersStore,
         input: AsyncThrowingStream<String, Error>? = nil,
         output: OutputWriter? = nil
@@ -98,7 +98,7 @@ actor MCPServer {
     ///
     /// Uses an async line stream to avoid blocking the cooperative thread pool
     /// (unlike `readLine()` which is synchronous).
-    func run() async {
+    public func run() async {
         logStderr("reminders-mcp server starting")
 
         do {

@@ -5,7 +5,7 @@ import Foundation
 import RemindersCore
 import RemindersTestSupport
 
-@testable import reminders
+@testable import RemindersServer
 
 /// Collects output lines across threads.
 final class OutputCollector: @unchecked Sendable {

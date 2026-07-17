@@ -5,7 +5,7 @@ import Foundation
 import RemindersTestSupport
 import Testing
 
-@testable import reminders
+@testable import RemindersServer
 
 @Suite("MCP server end to end")
 struct MCPServerE2ETests {
