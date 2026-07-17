@@ -667,9 +667,7 @@ actor MCPServer {
         if let dueDateString = params["due_date"]?.stringValue() {
             guard let date = parseDate(dueDateString) else {
                 return .error(
-                    "Invalid due_date \"\(dueDateString)\". "
-                    + "Supported formats: today, tomorrow, next week, yyyy-MM-dd, "
-                    + "yyyy-MM-dd HH:mm, MM/dd/yyyy, MM/dd."
+                    "Invalid due_date \"\(dueDateString)\". Supported formats: \(supportedDateFormats)."
                 )
             }
             parsedDueDate = date
