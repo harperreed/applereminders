@@ -239,7 +239,9 @@ actor MCPServer {
 
     /// Encodes a JSON-RPC envelope to a single-line string via JSONEncoder.
     /// Falls back to an error response (and finally to a constant) so the server
-    /// always writes valid JSON no matter what encoding throws.
+    /// always writes valid JSON no matter what encoding throws. The fallback calls
+    /// `makeErrorResponse` directly — `makeErrorResponse` has its own independent
+    /// fallback and does not re-enter `encodeEnvelope`.
     private func encodeEnvelope<T: Encodable>(_ envelope: T, id: RequestID?) -> String {
         do {
             let data = try encoder.encode(envelope)

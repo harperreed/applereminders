@@ -78,7 +78,9 @@ func filterByDueDate(
     }
 
     guard let targetDate = parseDate(dueDate) else {
-        // If the date string is unparseable, return everything unfiltered.
+        // Defense-in-depth: all current call sites (AddCommand, ShowCommand,
+        // ShowAllCommand validate(), and MCP handleAddReminder) reject unparseable
+        // date strings before reaching here, so this branch is not the primary error path.
         return reminders
     }
 

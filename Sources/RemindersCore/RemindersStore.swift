@@ -72,6 +72,14 @@ public actor RemindersStore {
     /// `refreshSourcesIfNecessary()` must run before new fetches see current state.
     /// Safe to call more than once; only the first call registers. The CLI path is
     /// process-per-invocation and does not need this.
+    ///
+    /// The closure intentionally captures only the `UncheckedTransfer` wrapper (an
+    /// immutable `let`), not `self`, so it can run off-actor without entering the
+    /// actor's executor — safe here because `EKEventStore.refreshSourcesIfNecessary()`
+    /// is thread-safe per Apple's documentation.
+    ///
+    /// The observer is retained for the process lifetime; no removal API is provided
+    /// or needed for the MCP server use case.
     public func startObservingExternalChanges() {
         guard changeObserver == nil else { return }
         let store = UncheckedTransfer(value: eventStore)
