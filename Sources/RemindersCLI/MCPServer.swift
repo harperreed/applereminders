@@ -505,9 +505,11 @@ actor MCPServer {
             MCPToolDefinition(
                 name: "delete_reminder",
                 description: "Permanently delete a reminder from a list. This action cannot be "
-                    + "undone. Only incomplete reminders can be targeted. Pass the reminder's "
-                    + "stable id (preferred) or its zero-based position among the list's "
-                    + "incomplete reminders. Returns the deleted reminder as JSON.",
+                    + "undone. By default only incomplete reminders can be targeted; set "
+                    + "include_completed to true to delete completed ones (the positional index "
+                    + "then counts the combined view; stable ids are unaffected). Pass the "
+                    + "reminder's stable id (preferred) or its zero-based position. Returns the "
+                    + "deleted reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -524,17 +526,26 @@ actor MCPServer {
                                 + "reminders change).",
                             enum: nil
                         ),
+                        "include_completed": PropertySchema(
+                            type: "boolean",
+                            description: "When true, completed reminders can be targeted too. "
+                                + "The positional index then counts the combined view.",
+                            enum: nil
+                        ),
                     ],
                     required: ["list", "index"]
                 )
             ),
             MCPToolDefinition(
                 name: "edit_reminder",
-                description: "Edit an existing reminder's title and/or notes. Only the fields you "
-                    + "provide will be changed; omitted fields remain untouched. Only incomplete "
-                    + "reminders can be targeted. Pass the reminder's stable id (preferred) or "
-                    + "its zero-based position among the list's incomplete reminders. Returns "
-                    + "the updated reminder as JSON.",
+                description: "Edit an existing reminder. Only the fields you provide change; "
+                    + "omitted fields remain untouched. Can update the title, notes, due date, "
+                    + "priority, and list (move_to_list). Set clear_due_date to remove the due "
+                    + "date entirely. By default only incomplete reminders can be targeted; set "
+                    + "include_completed to true to edit completed ones (the positional index "
+                    + "then counts the combined view; stable ids are unaffected). Pass the "
+                    + "reminder's stable id (preferred) or its zero-based position. Returns the "
+                    + "updated reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -559,6 +570,36 @@ actor MCPServer {
                         "notes": PropertySchema(
                             type: "string",
                             description: "New notes text. Omit to keep the current notes.",
+                            enum: nil
+                        ),
+                        "due_date": PropertySchema(
+                            type: "string",
+                            description: "New due date. Accepts: 'today', 'tomorrow', 'next week', "
+                                + "'yyyy-MM-dd', 'yyyy-MM-dd HH:mm', 'MM/dd/yyyy', or 'MM/dd'. "
+                                + "Cannot be combined with clear_due_date.",
+                            enum: nil
+                        ),
+                        "clear_due_date": PropertySchema(
+                            type: "boolean",
+                            description: "When true, removes the reminder's due date and alarm. "
+                                + "Cannot be combined with due_date.",
+                            enum: nil
+                        ),
+                        "priority": PropertySchema(
+                            type: "string",
+                            description: "New priority level.",
+                            enum: ["none", "low", "medium", "high"]
+                        ),
+                        "move_to_list": PropertySchema(
+                            type: "string",
+                            description: "Name of the list to move the reminder to "
+                                + "(case-insensitive match).",
+                            enum: nil
+                        ),
+                        "include_completed": PropertySchema(
+                            type: "boolean",
+                            description: "When true, completed reminders can be targeted too. "
+                                + "The positional index then counts the combined view.",
                             enum: nil
                         ),
                     ],
@@ -798,8 +839,14 @@ actor MCPServer {
             return .error("Missing required parameter: 'index' (string or integer).")
         }
 
+        let includeCompleted = params["include_completed"]?.boolValue() ?? false
+
         do {
-            let deleted = try await store.delete(itemAtIndex: index, onList: listName)
+            let deleted = try await store.delete(
+                itemAtIndex: index,
+                onList: listName,
+                includeCompleted: includeCompleted
+            )
             let text = prettyEncodeJSON(deleted)
             return .success(text)
         } catch {
@@ -820,12 +867,57 @@ actor MCPServer {
 
         let newTitle = params["title"]?.stringValue()
         let newNotes = params["notes"]?.stringValue()
+        let moveToList = params["move_to_list"]?.stringValue()
+        let includeCompleted = params["include_completed"]?.boolValue() ?? false
+        let clearDueDate = params["clear_due_date"]?.boolValue() ?? false
+        let dueDateString = params["due_date"]?.stringValue()
+
+        if clearDueDate && dueDateString != nil {
+            return .error(
+                "Invalid parameters: 'due_date' and 'clear_due_date' cannot be combined. "
+                + "Use due_date to set a new date, or clear_due_date to remove it."
+            )
+        }
+
+        let dueDateChange: Date??
+        if clearDueDate {
+            dueDateChange = .some(nil)
+        } else if let dueDateString {
+            guard let parsed = parseDate(dueDateString) else {
+                return .error(
+                    "Invalid due_date \"\(dueDateString)\". Supported formats: \(supportedDateFormats)."
+                )
+            }
+            dueDateChange = .some(parsed)
+        } else {
+            dueDateChange = nil
+        }
+
+        let parsedPriority: ReminderPriority?
+        if let priorityString = params["priority"]?.stringValue() {
+            guard let priority = ReminderPriority(rawValue: priorityString.lowercased()) else {
+                return .error(
+                    "Invalid priority \"\(priorityString)\". "
+                    + "Must be one of: none, low, medium, high."
+                )
+            }
+            parsedPriority = priority
+        } else {
+            parsedPriority = nil
+        }
 
         do {
             let updated = try await store.update(
                 itemAtIndex: index,
                 onList: listName,
-                with: ReminderUpdate(title: newTitle, notes: newNotes)
+                with: ReminderUpdate(
+                    title: newTitle,
+                    notes: newNotes,
+                    dueDate: dueDateChange,
+                    priority: parsedPriority,
+                    listName: moveToList
+                ),
+                includeCompleted: includeCompleted
             )
             let text = prettyEncodeJSON(updated)
             return .success(text)

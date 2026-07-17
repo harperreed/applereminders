@@ -55,4 +55,27 @@ struct ToolDefinitionContentTests {
         let def = try definition(named: "delete_reminder")
         #expect(def.description.contains("Returns the deleted reminder as JSON"))
     }
+
+    @Test("edit_reminder schema advertises the phase 2 parameters")
+    func editReminderSchemaParams() throws {
+        let definitions = MCPServer.buildToolDefinitions()
+        let edit = try #require(definitions.first(where: { $0.name == "edit_reminder" }))
+        let properties = try #require(edit.inputSchema.properties)
+        #expect(properties["due_date"] != nil)
+        #expect(properties["clear_due_date"] != nil)
+        #expect(properties["priority"]?.enum == ["none", "low", "medium", "high"])
+        #expect(properties["move_to_list"] != nil)
+        #expect(properties["include_completed"] != nil)
+        #expect(edit.description.contains("include_completed"))
+        #expect(!edit.description.contains("Only incomplete reminders can be targeted"))
+    }
+
+    @Test("delete_reminder schema advertises include_completed")
+    func deleteReminderSchemaParams() throws {
+        let definitions = MCPServer.buildToolDefinitions()
+        let delete = try #require(definitions.first(where: { $0.name == "delete_reminder" }))
+        let properties = try #require(delete.inputSchema.properties)
+        #expect(properties["include_completed"] != nil)
+        #expect(!delete.description.contains("Only incomplete reminders can be targeted"))
+    }
 }
