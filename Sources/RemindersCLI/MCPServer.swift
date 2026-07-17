@@ -40,11 +40,25 @@ struct ToolRegistry: Sendable {
 /// responses to stdout. Each response is a single line of JSON followed by a newline.
 /// Diagnostic logging goes to stderr so it does not interfere with the protocol stream.
 actor MCPServer {
+    /// Writes one complete response line. Injectable so tests can capture output.
+    typealias OutputWriter = @Sendable (String) -> Void
+
     private let store: RemindersStore
     private let registry: ToolRegistry
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
-    init(store: RemindersStore) {
+    private let input: AsyncThrowingStream<String, Error>
+    private let output: OutputWriter
+
+    /// - Parameters:
+    ///   - store: The reminders store to serve.
+    ///   - input: Request lines to process. Defaults to stdin.
+    ///   - output: Where response lines go. Defaults to stdout with an immediate flush.
+    init(
+        store: RemindersStore,
+        input: AsyncThrowingStream<String, Error>? = nil,
+        output: OutputWriter? = nil
+    ) {
         self.store = store
         self.decoder = JSONDecoder()
 
@@ -52,20 +66,43 @@ actor MCPServer {
         self.encoder = JSONEncoder()
         self.encoder.outputFormatting = [.sortedKeys]
 
+        self.input = input ?? MCPServer.standardInputLines()
+        self.output = output ?? { line in
+            print(line)
+            fflush(stdout)
+        }
+
         self.registry = MCPServer.buildRegistry(store: store)
+    }
+
+    /// Bridges stdin into a line stream without blocking the cooperative pool.
+    private static func standardInputLines() -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let reader = Task {
+                do {
+                    for try await line in FileHandle.standardInput.bytes.lines {
+                        continuation.yield(line)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in reader.cancel() }
+        }
     }
 
     // MARK: - Main Loop
 
-    /// Runs the server, reading lines from stdin until EOF.
+    /// Runs the server, reading lines from the injected line stream (stdin by default) until EOF.
     ///
-    /// Uses `FileHandle.standardInput.bytes.lines` to avoid blocking the
-    /// cooperative thread pool (unlike `readLine()` which is synchronous).
+    /// Uses an async line stream to avoid blocking the cooperative thread pool
+    /// (unlike `readLine()` which is synchronous).
     func run() async {
         logStderr("reminders-mcp server starting")
 
         do {
-            for try await line in FileHandle.standardInput.bytes.lines {
+            for try await line in input {
                 guard !line.isEmpty else { continue }
 
                 logStderr("recv: \(line)")
@@ -281,10 +318,9 @@ actor MCPServer {
 
     // MARK: - I/O
 
-    /// Writes a single line to stdout and flushes immediately.
+    /// Writes a single response line through the injected output.
     private nonisolated func writeLine(_ line: String) {
-        print(line)
-        fflush(stdout)
+        output(line)
     }
 
     /// Writes a diagnostic message to stderr (never touches stdout).
@@ -325,7 +361,8 @@ actor MCPServer {
                     + "Returns a JSON array of reminder objects with id, title, notes, "
                     + "isCompleted, completionDate, priority, dueDate, listID, and listName "
                     + "fields. Pass a reminder's id to complete_reminder, uncomplete_reminder, "
-                    + "delete_reminder, or edit_reminder to target it reliably.",
+                    + "delete_reminder, or edit_reminder to target it reliably. "
+                    + "Use due_before and/or due_after (day-granular) to filter by due date.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -346,6 +383,19 @@ actor MCPServer {
                                 + "Cannot be used together with include_completed.",
                             enum: nil
                         ),
+                        "due_before": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or before this day. "
+                                + "Accepts: 'today', 'tomorrow', 'next week', 'yyyy-MM-dd', "
+                                + "'yyyy-MM-dd HH:mm', 'MM/dd/yyyy', or 'MM/dd'.",
+                            enum: nil
+                        ),
+                        "due_after": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or after this day. "
+                                + "Accepts the same formats as due_before.",
+                            enum: nil
+                        ),
                     ],
                     required: ["list"]
                 )
@@ -356,7 +406,8 @@ actor MCPServer {
                     + "list name. By default only returns incomplete reminders. "
                     + "Useful for getting a full overview of all pending tasks. "
                     + "Returns the same JSON reminder objects as show_reminders; each object's "
-                    + "id is a stable identifier accepted by the mutating tools.",
+                    + "id is a stable identifier accepted by the mutating tools. "
+                    + "Use due_before and/or due_after (day-granular) to filter by due date.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -370,6 +421,19 @@ actor MCPServer {
                             type: "boolean",
                             description: "When true, shows only completed reminders. "
                                 + "Cannot be used together with include_completed.",
+                            enum: nil
+                        ),
+                        "due_before": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or before this day. "
+                                + "Accepts: 'today', 'tomorrow', 'next week', 'yyyy-MM-dd', "
+                                + "'yyyy-MM-dd HH:mm', 'MM/dd/yyyy', or 'MM/dd'.",
+                            enum: nil
+                        ),
+                        "due_after": PropertySchema(
+                            type: "string",
+                            description: "Only include reminders due on or after this day. "
+                                + "Accepts the same formats as due_before.",
                             enum: nil
                         ),
                     ],
@@ -469,9 +533,11 @@ actor MCPServer {
             MCPToolDefinition(
                 name: "delete_reminder",
                 description: "Permanently delete a reminder from a list. This action cannot be "
-                    + "undone. Only incomplete reminders can be targeted. Pass the reminder's "
-                    + "stable id (preferred) or its zero-based position among the list's "
-                    + "incomplete reminders. Returns the deleted reminder as JSON.",
+                    + "undone. By default only incomplete reminders can be targeted; set "
+                    + "include_completed to true to delete completed ones (the positional index "
+                    + "then counts the combined view; stable ids are unaffected). Pass the "
+                    + "reminder's stable id (preferred) or its zero-based position. Returns the "
+                    + "deleted reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -488,17 +554,26 @@ actor MCPServer {
                                 + "reminders change).",
                             enum: nil
                         ),
+                        "include_completed": PropertySchema(
+                            type: "boolean",
+                            description: "When true, completed reminders can be targeted too. "
+                                + "The positional index then counts the combined view.",
+                            enum: nil
+                        ),
                     ],
                     required: ["list", "index"]
                 )
             ),
             MCPToolDefinition(
                 name: "edit_reminder",
-                description: "Edit an existing reminder's title and/or notes. Only the fields you "
-                    + "provide will be changed; omitted fields remain untouched. Only incomplete "
-                    + "reminders can be targeted. Pass the reminder's stable id (preferred) or "
-                    + "its zero-based position among the list's incomplete reminders. Returns "
-                    + "the updated reminder as JSON.",
+                description: "Edit an existing reminder. Only the fields you provide change; "
+                    + "omitted fields remain untouched. Can update the title, notes, due date, "
+                    + "priority, and list (move_to_list). Set clear_due_date to remove the due "
+                    + "date entirely. By default only incomplete reminders can be targeted; set "
+                    + "include_completed to true to edit completed ones (the positional index "
+                    + "then counts the combined view; stable ids are unaffected). Pass the "
+                    + "reminder's stable id (preferred) or its zero-based position. Returns the "
+                    + "updated reminder as JSON.",
                 inputSchema: JSONSchema(
                     type: "object",
                     properties: [
@@ -523,6 +598,36 @@ actor MCPServer {
                         "notes": PropertySchema(
                             type: "string",
                             description: "New notes text. Omit to keep the current notes.",
+                            enum: nil
+                        ),
+                        "due_date": PropertySchema(
+                            type: "string",
+                            description: "New due date. Accepts: 'today', 'tomorrow', 'next week', "
+                                + "'yyyy-MM-dd', 'yyyy-MM-dd HH:mm', 'MM/dd/yyyy', or 'MM/dd'. "
+                                + "Cannot be combined with clear_due_date.",
+                            enum: nil
+                        ),
+                        "clear_due_date": PropertySchema(
+                            type: "boolean",
+                            description: "When true, removes the reminder's due date and alarm. "
+                                + "Cannot be combined with due_date.",
+                            enum: nil
+                        ),
+                        "priority": PropertySchema(
+                            type: "string",
+                            description: "New priority level.",
+                            enum: ["none", "low", "medium", "high"]
+                        ),
+                        "move_to_list": PropertySchema(
+                            type: "string",
+                            description: "Name of the list to move the reminder to "
+                                + "(case-insensitive match).",
+                            enum: nil
+                        ),
+                        "include_completed": PropertySchema(
+                            type: "boolean",
+                            description: "When true, completed reminders can be targeted too. "
+                                + "The positional index then counts the combined view.",
                             enum: nil
                         ),
                     ],
@@ -611,13 +716,20 @@ actor MCPServer {
             )
         }
 
+        let (dueBefore, dueBeforeError) = parseDueBound("due_before", from: params)
+        if let err = dueBeforeError { return err }
+
+        let (dueAfter, dueAfterError) = parseDueBound("due_after", from: params)
+        if let err = dueAfterError { return err }
+
         do {
             let reminders = try await store.reminders(
                 inList: listName,
                 includeCompleted: includeCompleted || onlyCompleted,
                 onlyCompleted: onlyCompleted
             )
-            let text = prettyEncodeJSON(reminders)
+            let filtered = filterByDueWindow(reminders, dueBefore: dueBefore, dueAfter: dueAfter)
+            let text = prettyEncodeJSON(filtered)
             return .success(text)
         } catch {
             return .error("Failed to fetch reminders: \(error.localizedDescription)")
@@ -638,12 +750,19 @@ actor MCPServer {
             )
         }
 
+        let (dueBefore, dueBeforeError) = parseDueBound("due_before", from: params)
+        if let err = dueBeforeError { return err }
+
+        let (dueAfter, dueAfterError) = parseDueBound("due_after", from: params)
+        if let err = dueAfterError { return err }
+
         do {
             let reminders = try await store.reminders(
                 includeCompleted: includeCompleted || onlyCompleted,
                 onlyCompleted: onlyCompleted
             )
-            let text = prettyEncodeJSON(reminders)
+            let filtered = filterByDueWindow(reminders, dueBefore: dueBefore, dueAfter: dueAfter)
+            let text = prettyEncodeJSON(filtered)
             return .success(text)
         } catch {
             return .error("Failed to fetch reminders: \(error.localizedDescription)")
@@ -762,8 +881,14 @@ actor MCPServer {
             return .error("Missing required parameter: 'index' (string or integer).")
         }
 
+        let includeCompleted = params["include_completed"]?.boolValue() ?? false
+
         do {
-            let deleted = try await store.delete(itemAtIndex: index, onList: listName)
+            let deleted = try await store.delete(
+                itemAtIndex: index,
+                onList: listName,
+                includeCompleted: includeCompleted
+            )
             let text = prettyEncodeJSON(deleted)
             return .success(text)
         } catch {
@@ -784,18 +909,62 @@ actor MCPServer {
 
         let newTitle = params["title"]?.stringValue()
         let newNotes = params["notes"]?.stringValue()
+        let moveToList = params["move_to_list"]?.stringValue()
+        let includeCompleted = params["include_completed"]?.boolValue() ?? false
+        let clearDueDate = params["clear_due_date"]?.boolValue() ?? false
+        let dueDateString = params["due_date"]?.stringValue()
+
+        if clearDueDate && dueDateString != nil {
+            return .error(
+                "Invalid parameters: 'due_date' and 'clear_due_date' cannot be combined. "
+                + "Use due_date to set a new date, or clear_due_date to remove it."
+            )
+        }
+
+        let dueDateChange: Date??
+        if clearDueDate {
+            dueDateChange = .some(nil)
+        } else if let dueDateString {
+            guard let parsed = parseDate(dueDateString) else {
+                return .error(
+                    "Invalid due_date \"\(dueDateString)\". Supported formats: \(supportedDateFormats)."
+                )
+            }
+            dueDateChange = .some(parsed)
+        } else {
+            dueDateChange = nil
+        }
+
+        let parsedPriority: ReminderPriority?
+        if let priorityString = params["priority"]?.stringValue() {
+            guard let priority = ReminderPriority(rawValue: priorityString.lowercased()) else {
+                return .error(
+                    "Invalid priority \"\(priorityString)\". "
+                    + "Must be one of: none, low, medium, high."
+                )
+            }
+            parsedPriority = priority
+        } else {
+            parsedPriority = nil
+        }
 
         do {
-            let updated = try await store.edit(
+            let updated = try await store.update(
                 itemAtIndex: index,
                 onList: listName,
-                newText: newTitle,
-                newNotes: newNotes
+                with: ReminderUpdate(
+                    title: newTitle,
+                    notes: newNotes,
+                    dueDate: dueDateChange,
+                    priority: parsedPriority,
+                    listName: moveToList
+                ),
+                includeCompleted: includeCompleted
             )
             let text = prettyEncodeJSON(updated)
             return .success(text)
         } catch {
-            return .error("Failed to edit reminder: \(error.localizedDescription)")
+            return .error("Failed to update reminder: \(error.localizedDescription)")
         }
     }
 
@@ -818,6 +987,23 @@ actor MCPServer {
     }
 
     // MARK: - Argument Helpers
+
+    /// Parses an optional due-bound parameter (e.g. `due_before` or `due_after`) from the tool
+    /// params dictionary. Returns `(nil, nil)` when the key is absent, `(date, nil)` when present
+    /// and parseable, or `(nil, toolError)` when the value cannot be parsed — with an error message
+    /// that names the key and the supported formats.
+    private static func parseDueBound(
+        _ key: String,
+        from params: [String: JSONValue]
+    ) -> (date: Date?, error: MCPToolResult?) {
+        guard let boundString = params[key]?.stringValue() else {
+            return (nil, nil)
+        }
+        guard let parsed = parseDate(boundString) else {
+            return (nil, .error("Invalid \(key) \"\(boundString)\". Supported formats: \(supportedDateFormats)."))
+        }
+        return (parsed, nil)
+    }
 
     /// Extracts the `index` argument as a string, accepting both integer and string JSON values.
     private static func extractIndex(from arguments: [String: JSONValue]) -> String? {

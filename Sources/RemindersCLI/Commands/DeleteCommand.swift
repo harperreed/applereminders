@@ -18,12 +18,17 @@ struct DeleteCommand: AsyncParsableCommand {
         + "or a stable id from `show --format json`."))
     var index: String
 
+    @Flag(name: .long, help: ArgumentHelp("Allow targeting completed reminders. The index then "
+        + "counts the combined view shown by `show --include-completed`; stable ids are unaffected."))
+    var includeCompleted = false
+
     func run() async throws {
         await withGracefulErrors {
             let store = try await makeStore()
             let deleted = try await store.delete(
                 itemAtIndex: index,
-                onList: listName
+                onList: listName,
+                includeCompleted: includeCompleted
             )
             print("Deleted: \(deleted.title)")
         }

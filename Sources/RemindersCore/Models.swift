@@ -99,6 +99,29 @@ public struct ReminderItem: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+// Custom encode so that dueDate is always present in the output (as null when absent),
+// making clear-due-date operations visible to callers who inspect the JSON.
+extension ReminderItem {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, notes, isCompleted, completionDate, priority, dueDate, listID, listName
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        // notes and completionDate omit rather than null; only dueDate needs explicit null for clear-operation visibility.
+        try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encode(isCompleted, forKey: .isCompleted)
+        try container.encodeIfPresent(completionDate, forKey: .completionDate)
+        try container.encode(priority, forKey: .priority)
+        // Always emit dueDate — null when cleared, ISO-8601 string when set.
+        try container.encode(dueDate, forKey: .dueDate)
+        try container.encode(listID, forKey: .listID)
+        try container.encode(listName, forKey: .listName)
+    }
+}
+
 // MARK: - ReminderDraft
 
 /// Holds the fields needed to create a new reminder.

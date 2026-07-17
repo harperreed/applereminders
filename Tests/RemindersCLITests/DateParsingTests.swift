@@ -130,16 +130,6 @@ struct FilterByDueDateTests {
         #expect(result.count == 2)
     }
 
-    @Test("unparseable dueDate filter returns all reminders")
-    func unparseableDateReturnsAll() {
-        let reminders = [
-            makeReminder(id: "1", title: "A"),
-            makeReminder(id: "2", title: "B"),
-        ]
-        let result = filterByDueDate(reminders, dueDate: "not-a-date", includeOverdue: false)
-        #expect(result.count == 2)
-    }
-
     @Test("filters out reminders without due dates")
     func filtersOutNoDueDate() {
         let calendar = Calendar.current
@@ -148,7 +138,7 @@ struct FilterByDueDateTests {
             makeReminder(id: "1", title: "Has due date", dueDate: tomorrow),
             makeReminder(id: "2", title: "No due date", dueDate: nil),
         ]
-        let result = filterByDueDate(reminders, dueDate: "tomorrow", includeOverdue: false)
+        let result = filterByDueDate(reminders, dueDate: parseDate("tomorrow"), includeOverdue: false)
         #expect(result.count == 1)
         #expect(result[0].id == "1")
     }
@@ -163,10 +153,10 @@ struct FilterByDueDateTests {
             makeReminder(id: "upcoming", title: "Upcoming", dueDate: tomorrow),
         ]
 
-        let withOverdue = filterByDueDate(reminders, dueDate: "tomorrow", includeOverdue: true)
+        let withOverdue = filterByDueDate(reminders, dueDate: parseDate("tomorrow"), includeOverdue: true)
         #expect(withOverdue.count == 2)
 
-        let withoutOverdue = filterByDueDate(reminders, dueDate: "tomorrow", includeOverdue: false)
+        let withoutOverdue = filterByDueDate(reminders, dueDate: parseDate("tomorrow"), includeOverdue: false)
         #expect(withoutOverdue.count == 1)
         #expect(withoutOverdue[0].id == "upcoming")
     }
@@ -182,8 +172,89 @@ struct FilterByDueDateTests {
             makeReminder(id: "later", title: "Later", dueDate: inTenDays),
         ]
         // Filter for "next week" — should include the 2-day-out item but not the 10-day-out item
-        let result = filterByDueDate(reminders, dueDate: "next week", includeOverdue: false)
+        let result = filterByDueDate(reminders, dueDate: parseDate("next week"), includeOverdue: false)
         #expect(result.count == 1)
         #expect(result[0].id == "soon")
+    }
+}
+
+@Suite("filterByDueWindow")
+struct FilterByDueWindowTests {
+
+    private func item(_ title: String, due: String?) -> ReminderItem {
+        ReminderItem(
+            id: title,
+            title: title,
+            isCompleted: false,
+            priority: .none,
+            dueDate: due.flatMap(parseDate),
+            listID: "L",
+            listName: "L"
+        )
+    }
+
+    @Test("no bounds returns the input unchanged")
+    func noBounds() {
+        let reminders = [item("a", due: nil), item("b", due: "2026-06-15")]
+        #expect(filterByDueWindow(reminders, dueBefore: nil, dueAfter: nil).count == 2)
+    }
+
+    @Test("due_before keeps reminders due on or before that day")
+    func before() {
+        let reminders = [
+            item("early", due: "2026-06-10"),
+            item("on the day", due: "2026-06-15"),
+            item("late", due: "2026-06-20"),
+        ]
+        let filtered = filterByDueWindow(
+            reminders, dueBefore: parseDate("2026-06-15"), dueAfter: nil
+        )
+        #expect(filtered.map(\.title) == ["early", "on the day"])
+    }
+
+    @Test("due_after keeps reminders due on or after that day")
+    func after() {
+        let reminders = [
+            item("early", due: "2026-06-10"),
+            item("on the day", due: "2026-06-15"),
+            item("late", due: "2026-06-20"),
+        ]
+        let filtered = filterByDueWindow(
+            reminders, dueBefore: nil, dueAfter: parseDate("2026-06-15")
+        )
+        #expect(filtered.map(\.title) == ["on the day", "late"])
+    }
+
+    @Test("both bounds form a window")
+    func window() {
+        let reminders = [
+            item("early", due: "2026-06-10"),
+            item("inside", due: "2026-06-15"),
+            item("late", due: "2026-06-20"),
+        ]
+        let filtered = filterByDueWindow(
+            reminders,
+            dueBefore: parseDate("2026-06-18"),
+            dueAfter: parseDate("2026-06-12")
+        )
+        #expect(filtered.map(\.title) == ["inside"])
+    }
+
+    @Test("reminders without a due date are excluded when a bound is present")
+    func noDueDateExcluded() {
+        let reminders = [item("undated", due: nil), item("dated", due: "2026-06-15")]
+        let filtered = filterByDueWindow(
+            reminders, dueBefore: parseDate("2026-06-16"), dueAfter: nil
+        )
+        #expect(filtered.map(\.title) == ["dated"])
+    }
+
+    @Test("a timed reminder on the boundary day is inside the window")
+    func timedBoundary() {
+        let reminders = [item("evening", due: "2026-06-15 22:30")]
+        let filtered = filterByDueWindow(
+            reminders, dueBefore: parseDate("2026-06-15"), dueAfter: parseDate("2026-06-15")
+        )
+        #expect(filtered.count == 1)
     }
 }

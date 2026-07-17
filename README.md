@@ -62,12 +62,22 @@ reminders uncomplete Groceries 0            # index counts COMPLETED reminders o
 reminders delete Groceries 2
 reminders edit Groceries 1 New title text
 reminders edit Groceries 1 -n "new note"
+reminders edit Groceries 1 -d tomorrow -p high  # options only: title stays
+reminders edit Groceries 1 --clear-due-date
+reminders edit Groceries 1 --move-to Projects
+reminders delete Groceries 2 --include-completed
 reminders new-list Projects
 reminders new-list Projects --source iCloud
 ```
 
 Put options (`-d`, `-p`, `-n`) before the title words in `add` and `edit`.
 Everything after the first word that is not an option becomes part of the title.
+
+`edit` changes only what you pass: title words, `-n` notes, `-d` due date,
+`--clear-due-date`, `-p` priority, or `--move-to LIST`. Add `--include-completed`
+to `edit` or `delete` to target completed reminders; the index then counts the
+combined view from `show --include-completed`, while stable ids keep working
+unchanged.
 
 ### Targeting a reminder: index vs id
 
@@ -126,14 +136,18 @@ Any other MCP client:
 | `add_reminder` | Create with title, notes, due date, priority |
 | `complete_reminder` | Mark complete (by stable id or index) |
 | `uncomplete_reminder` | Reopen (by stable id, or index into the completed view) |
-| `delete_reminder` | Delete permanently; returns the deleted reminder as JSON |
-| `edit_reminder` | Change title and/or notes |
+| `delete_reminder` | Delete permanently; returns the deleted reminder as JSON. `include_completed` targets completed ones |
+| `edit_reminder` | Change title, notes, due date (set or clear), priority, or list |
 | `create_list` | Create a new reminder list |
 
 Every reminder object includes a stable `id`, and models should pass that back
 to the mutating tools instead of a positional index. The server watches
 EventKit change notifications, so edits made in the Reminders app show up
 without a restart.
+
+`show_reminders` and `show_all_reminders` also take `due_before` and
+`due_after` (day-granular, same date formats as the CLI) to narrow results
+to a due-date window.
 
 ## Compatibility with keith/reminders-cli
 
