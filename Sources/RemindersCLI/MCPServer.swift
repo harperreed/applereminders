@@ -191,6 +191,24 @@ actor MCPServer {
 
         logStderr("Calling tool: \(toolName)")
 
+        // Reminders access is requested lazily so the protocol stream stays alive even
+        // when access is denied; the failure surfaces as an actionable tool error.
+        do {
+            try await store.requestAccess()
+        } catch {
+            let denied = MCPToolResult.error(
+                "Reminders access is not available: \(error.localizedDescription) "
+                + "Grant access in System Settings > Privacy & Security > Reminders "
+                + "for the app that launched this MCP server, then call the tool again."
+            )
+            let line = encodeEnvelope(
+                JSONRPCResponse(id: request.id, result: denied),
+                id: request.id
+            )
+            writeLine(line)
+            return
+        }
+
         let toolResult = await registry.call(tool: toolName, params: arguments)
 
         let line = encodeEnvelope(
