@@ -1,5 +1,5 @@
 // ABOUTME: End-to-end tests for the REST write endpoints (create, patch, complete, delete).
-// ABOUTME: Covers happy paths, validation 400s, unknown-id 404s, and the due_date null-vs-absent split.
+// ABOUTME: Covers happy paths, validation 400s, unknown-id 404s, and due_date patch semantics.
 
 import Foundation
 import Hummingbird
@@ -12,6 +12,17 @@ import Testing
 
 @Suite("REST write endpoints")
 struct RESTWriteEndpointTests {
+
+    private final class LogBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _lines: [String] = []
+
+        var lines: [String] { lock.withLock { _lines } }
+
+        func append(_ line: String) {
+            lock.withLock { _lines.append(line) }
+        }
+    }
 
     @Test func createReturns201AndPersists() async throws {
         let (backend, store) = makeTestStore()
@@ -136,6 +147,33 @@ struct RESTWriteEndpointTests {
         }
     }
 
+    @Test func oversizedCreateBodyIs413AndLogs413() async throws {
+        let (backend, store) = makeTestStore()
+        backend.addCalendar(named: "Chores")
+        let logBox = LogBox()
+        let app = Application(
+            router: buildRouter(store: store, token: testToken, log: { logBox.append($0) })
+        )
+        let body = #"{"list":"Chores","title":""#
+            + String(repeating: "x", count: 2 * 1024 * 1024)
+            + #""}"#
+
+        try await app.test(.router) { client in
+            try await client.execute(
+                uri: "/api/reminders",
+                method: .post,
+                headers: authHeaders,
+                body: ByteBuffer(string: body)
+            ) { response in
+                #expect(response.status == .contentTooLarge)
+            }
+        }
+
+        let line = try #require(logBox.lines.first)
+        #expect(line.contains("POST /api/reminders 413"))
+        #expect(backend.savedReminders.isEmpty)
+    }
+
     @Test func patchEditsTitleNotesPriorityAndList() async throws {
         let (backend, store) = makeTestStore()
         backend.addCalendar(named: "Chores")
@@ -193,6 +231,42 @@ struct RESTWriteEndpointTests {
                 #expect(item.dueDate == nil)
             }
         }
+    }
+
+    @Test func patchDueDateSetsIt() async throws {
+        let (backend, store) = makeTestStore()
+        backend.addCalendar(named: "Chores")
+        let expectedDate = try #require(parseDate("2031-02-03"))
+        let app = makeTestApp(store: store)
+
+        try await app.test(.router) { client in
+            let id = try await client.execute(
+                uri: "/api/reminders",
+                method: .post,
+                headers: authHeaders,
+                body: ByteBuffer(string: #"{"list": "Chores", "title": "Undated"}"#)
+            ) { response -> String in
+                let item = try decodeBody(ReminderItem.self, from: response)
+                #expect(item.dueDate == nil)
+                return item.id
+            }
+
+            try await client.execute(
+                uri: "/api/reminders/\(id)",
+                method: .patch,
+                headers: authHeaders,
+                body: ByteBuffer(string: #"{"due_date": "2031-02-03"}"#)
+            ) { response in
+                #expect(response.status == .ok)
+                let item = try decodeBody(ReminderItem.self, from: response)
+                #expect(item.dueDate == expectedDate)
+            }
+        }
+
+        let persisted = try #require(backend.currentReminders.first)
+        #expect(persisted.dueDateComponents?.year == 2031)
+        #expect(persisted.dueDateComponents?.month == 2)
+        #expect(persisted.dueDateComponents?.day == 3)
     }
 
     @Test func patchWithoutDueDateKeyLeavesDueDateUntouched() async throws {

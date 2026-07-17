@@ -63,7 +63,8 @@ struct RequestLogMiddleware<Context: RequestContext>: RouterMiddleware {
 
 /// Maps errors thrown by REST handlers onto the spec's JSON error bodies:
 /// not-found store errors to 404, other store errors to 500, RESTError to its
-/// own status, anything unexpected to 500.
+/// own status, HTTP response errors through their response generator, and
+/// anything unexpected to 500.
 struct RESTErrorMiddleware<Context: RequestContext>: RouterMiddleware {
     func handle(
         _ request: Request,
@@ -81,6 +82,8 @@ struct RESTErrorMiddleware<Context: RequestContext>: RouterMiddleware {
             case .accessDenied, .writeOnlyAccess, .operationFailed:
                 return try errorResponse(status: .internalServerError, message: error.localizedDescription)
             }
+        } catch let error as any HTTPResponseError {
+            return try error.response(from: request, context: context)
         } catch {
             return try errorResponse(status: .internalServerError, message: error.localizedDescription)
         }
