@@ -174,10 +174,11 @@ Notes for coding agents live in [CLAUDE.md](CLAUDE.md).
 ## Network server
 
 `reminders serve` runs an HTTP server that exposes the same reminder tools over
-the network. Two surfaces share one listener and one bearer token:
+the network. One listener exposes three surfaces:
 
 - `POST /mcp`: MCP over Streamable HTTP (stateless: no sessions, no SSE)
 - `/api/*`: a JSON REST API
+- `GET /openapi`: public OpenAPI 3.1 JSON for the REST surface
 
 ### Setup
 
@@ -209,8 +210,9 @@ claude mcp add --transport http reminders \
 
 ### REST API
 
-Every request needs `Authorization: Bearer <token>`. Errors: 401 with an empty
-body; 400, 404, and 500 with `{"error": "message"}`.
+Every REST and MCP request needs `Authorization: Bearer <token>`; `/openapi`
+is public. REST errors: 401 with an empty body; 400, 404, and 500 with
+`{"error": "message"}`.
 
 | Method and path | Body / query | Returns |
 | --- | --- | --- |
@@ -221,6 +223,13 @@ body; 400, 404, and 500 with `{"error": "message"}`.
 | POST /api/reminders/{id}/complete | | the completed reminder |
 | POST /api/reminders/{id}/uncomplete | | the reopened reminder |
 | DELETE /api/reminders/{id} | | the deleted reminder |
+
+Fetch the public OpenAPI document:
+
+```bash
+curl -fsS \
+  http://<tailscale-ip>:7364/openapi | jq
+```
 
 Dates accept the CLI formats (`today`, `tomorrow`, `next week`, `2030-01-15`,
 `2030-01-15 09:30`, `01/15/2030`, `01/15`). Priorities: `none`, `low`,
