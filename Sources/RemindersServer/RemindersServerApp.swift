@@ -66,8 +66,14 @@ func buildRouter(
     log: @escaping @Sendable (String) -> Void = defaultHTTPLog
 ) -> Router<BasicRequestContext> {
     let router = Router()
-    // Global middleware: logging wraps auth so 401s get logged too.
+    // Request logging is public so it covers /openapi and authenticated routes.
     router.middlewares.add(RequestLogMiddleware(log: log))
+
+    router.get("openapi") { _, _ -> Response in
+        openAPISpecResponse()
+    }
+
+    // Hummingbird middleware applies only to routes registered after this call.
     router.middlewares.add(BearerTokenMiddleware(token: token))
 
     let api = router.group("api")
