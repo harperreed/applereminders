@@ -1,16 +1,16 @@
-# Authenticated OpenAPI Endpoint Implementation Plan
+# Public OpenAPI Endpoint Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Serve the REST API's OpenAPI 3.1 document from authenticated `GET /openapi` without touching EventKit.
+**Goal:** Serve the REST API's OpenAPI 3.1 document from public `GET /openapi` without touching EventKit.
 
-**Architecture:** Add one focused source file containing the embedded JSON document and a response builder. Register the route on the existing globally authenticated router, outside the `/api` group's Reminders-access middleware. An in-memory endpoint test validates auth, media type, path/operation coverage, and the bearer security declaration.
+**Architecture:** Add one focused source file containing the embedded JSON document and a response builder. Register the route after global request logging but before bearer middleware; Hummingbird middleware applies only to endpoints registered after it. An in-memory endpoint test validates public access, no TCC access, media type, path/operation coverage, and the bearer security declaration for the APIs described by the document.
 
 **Tech Stack:** Swift 6, Hummingbird 2, Swift Testing, OpenAPI 3.1 JSON.
 
 ## Global Constraints
 
-- `GET /openapi` requires the existing bearer token and returns the existing empty 401 when authentication fails.
+- `GET /openapi` is public; `/api/*` and `/mcp` retain the existing bearer-token requirement and empty 401 behavior.
 - A successful response is status 200 with `Content-Type: application/json`.
 - The document describes exactly the five REST paths and seven operations; MCP, Swagger UI, YAML, and `/openapi.json` are out of scope.
 - Serving the document must not request Reminders permission or access EventKit.
@@ -19,7 +19,7 @@
 
 ---
 
-### Task 1: Serve the authenticated OpenAPI document
+### Task 1: Serve the public OpenAPI document
 
 **Files:**
 - Create: `Tests/RemindersServerTests/OpenAPIEndpointTests.swift`
@@ -28,7 +28,7 @@
 - Modify: `README.md`
 
 **Interfaces:**
-- Consumes: `buildRouter(store:token:log:)`, global `BearerTokenMiddleware`, Hummingbird `Response`, and `ByteBuffer`.
+- Consumes: `buildRouter(store:token:log:)`, order-scoped `BearerTokenMiddleware`, Hummingbird `Response`, and `ByteBuffer`.
 - Produces: internal `let openAPISpecJSON: String` and `func openAPISpecResponse() -> Response`.
 
 - [ ] **Step 1: Write the failing endpoint contract test**
@@ -36,7 +36,7 @@
 Create `Tests/RemindersServerTests/OpenAPIEndpointTests.swift`:
 
 ```swift
-// ABOUTME: End-to-end tests for the authenticated GET /openapi endpoint.
+// ABOUTME: End-to-end tests for the public GET /openapi endpoint.
 // ABOUTME: Validates the embedded document's routes and bearer security without TCC.
 
 import Foundation
@@ -49,18 +49,13 @@ import Testing
 @Suite("OpenAPI endpoint")
 struct OpenAPIEndpointTests {
 
-    @Test func requiresAuthAndDescribesEveryRESTOperation() async throws {
+    @Test func isPublicAndDescribesEveryRESTOperation() async throws {
         let (backend, store) = makeTestStore()
         backend.authorizationStatus = .denied
         let app = makeTestApp(store: store)
 
         try await app.test(.router) { client in
             try await client.execute(uri: "/openapi", method: .get) { response in
-                #expect(response.status == .unauthorized)
-                #expect(response.body.readableBytes == 0)
-            }
-
-            try await client.execute(uri: "/openapi", method: .get, headers: authHeaders) { response in
                 #expect(response.status == .ok)
                 #expect(response.headers[.contentType] == "application/json")
 
@@ -121,7 +116,7 @@ Run:
 swift test --filter OpenAPIEndpointTests
 ```
 
-Expected: the unauthenticated request is 401 because auth is global, but the authenticated request fails with status 404 rather than 200.
+Expected: the unauthenticated request fails with status 404 rather than 200.
 
 - [ ] **Step 3: Add the embedded OpenAPI document**
 
@@ -389,17 +384,25 @@ func openAPISpecResponse() -> Response {
 }
 ```
 
-- [ ] **Step 4: Register the route outside the TCC middleware group**
+- [ ] **Step 4: Register the route before bearer middleware**
 
-In `Sources/RemindersServer/RemindersServerApp.swift`, immediately after the two global middleware registrations and before `let api = router.group("api")`, add:
+In `Sources/RemindersServer/RemindersServerApp.swift`, replace the existing global middleware block:
 
 ```swift
+    // Request logging is public so it covers /openapi and authenticated routes.
+    router.middlewares.add(RequestLogMiddleware(log: log))
+
     router.get("openapi") { _, _ -> Response in
         openAPISpecResponse()
     }
+
+    // Hummingbird middleware applies only to routes registered after this call.
+    router.middlewares.add(BearerTokenMiddleware(token: token))
 ```
 
-This location keeps bearer authentication and request logging while avoiding `RemindersAccessMiddleware`.
+This ordering keeps request logging on every route, leaves `/openapi` public,
+and preserves bearer authentication for the `/api` and `/mcp` routes registered
+afterward. The route also remains outside `RemindersAccessMiddleware`.
 
 - [ ] **Step 5: Run the endpoint test and verify GREEN**
 
@@ -416,17 +419,24 @@ Expected: 1 test passes with zero warnings.
 In `README.md`, add `/openapi` to the network-server surface list:
 
 ```markdown
-- `GET /openapi`: OpenAPI 3.1 JSON for the REST surface
+- `GET /openapi`: public OpenAPI 3.1 JSON for the REST surface
+```
+
+Replace the REST authentication introduction with:
+
+```markdown
+Every REST and MCP request needs `Authorization: Bearer <token>`; `/openapi`
+is public. REST errors: 401 with an empty body; 400, 404, and 500 with
+`{"error": "message"}`.
 ```
 
 After the REST endpoint table, add:
 
 ````markdown
-Fetch the OpenAPI document with the same bearer token:
+Fetch the public OpenAPI document:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer $REMINDERS_TOKEN" \
   http://<tailscale-ip>:7364/openapi | jq
 ```
 ````
@@ -443,7 +453,7 @@ git diff --check
 
 Expected: all 241 tests pass in 37 suites, build output has zero warnings, shell syntax passes, and `git diff --check` prints nothing.
 
-- [ ] **Step 8: Run a live authenticated request without exposing the token**
+- [ ] **Step 8: Run a live public request**
 
 Run:
 
@@ -457,15 +467,14 @@ TAILSCALE_IP=$(ifconfig | awk '
     if (octets[2] >= 64 && octets[2] <= 127) {print $2; exit}
   }
 ')
-TOKEN=$(tr -d '\r\n' < "$HOME/.config/reminders-mcp/token")
-curl -fsS -H "Authorization: Bearer $TOKEN" "http://$TAILSCALE_IP:7364/openapi" \
+curl -fsS "http://$TAILSCALE_IP:7364/openapi" \
   | jq -e '.openapi == "3.1.0" and (.paths | length == 5)'
 kill "$SERVER_PID"
 wait "$SERVER_PID" 2>/dev/null || true
 trap - EXIT
 ```
 
-Expected: `jq` prints `true`; the server exits; neither the token nor response bodies enter request logs.
+Expected: `jq` prints `true`; the server exits; no token is needed and response bodies do not enter request logs.
 
 - [ ] **Step 9: Commit**
 
@@ -474,5 +483,5 @@ git add Sources/RemindersServer/OpenAPISpec.swift \
   Sources/RemindersServer/RemindersServerApp.swift \
   Tests/RemindersServerTests/OpenAPIEndpointTests.swift \
   README.md
-git commit -m "feat: serve authenticated OpenAPI spec"
+git commit -m "feat: serve public OpenAPI spec"
 ```
