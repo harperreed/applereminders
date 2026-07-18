@@ -183,7 +183,7 @@ the network. One listener exposes three surfaces:
 ### Setup
 
 ```bash
-# one time: create the bearer token (printed once, stored with mode 600)
+# one time: create the bearer token (saved to ~/.config/reminders-mcp/token, mode 600)
 reminders serve --generate-token
 
 # run in the foreground
@@ -194,6 +194,13 @@ reminders agent install
 reminders agent status
 reminders agent uninstall
 ```
+
+`serve --generate-token` prints the token once, but it is not ephemeral: it is
+saved to `~/.config/reminders-mcp/token` and you can read it back anytime with
+`cat ~/.config/reminders-mcp/token`. To rotate it, delete that file and
+generate again; `--generate-token` refuses to overwrite an existing token, so
+you cannot clobber it by accident. Rotating invalidates every client using the
+old token.
 
 The server binds the Mac's tailscale interface by default and refuses to start
 without one. `--bind` overrides the interface, `--port` overrides the default
