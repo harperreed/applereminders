@@ -193,6 +193,23 @@ reminders serve
 reminders agent install
 reminders agent status
 reminders agent uninstall
+
+# optionally choose any non-root HTTPS Tailscale Serve path
+reminders agent install --tailscale-serve-path /reminders
+```
+
+`agent install` copies the executable to
+`~/Library/Application Support/reminders-mcp/reminders` and points the LaunchAgent
+at that copy. You can move, clean, or rebuild the checkout without changing the
+running agent. To update the agent, run `agent install` from the new build with
+the same options. If installation fails, it restores the previous executable
+and LaunchAgent. `agent uninstall` leaves the installed executable, token, and logs.
+
+After installation, run the installed copy once in Terminal to grant Reminders
+access if macOS prompts:
+
+```bash
+"$HOME/Library/Application Support/reminders-mcp/reminders" show-lists
 ```
 
 `serve --generate-token` prints the token once, but it is not ephemeral: it is
@@ -207,11 +224,42 @@ without one. `--bind` overrides the interface, `--port` overrides the default
 7364, and `--token-file` overrides the token path
 (`~/.config/reminders-mcp/token`).
 
+The server's default external base path is `/`. Omitting
+`--tailscale-serve-path` preserves the existing behavior: the LaunchAgent runs
+`reminders serve` with no extra arguments and binds directly to the Mac's
+Tailscale interface.
+
+When `--tailscale-serve-path` is set, the LaunchAgent binds to
+`127.0.0.1:7364` instead and registers only that path with Tailscale Serve. For
+the `/reminders` example, the endpoints become:
+
+- `https://<tailscale-hostname>/reminders/mcp`
+- `https://<tailscale-hostname>/reminders/api/*`
+- `https://<tailscale-hostname>/reminders/openapi`
+
+The installer uses a path-specific `tailscale serve` command, so other Serve
+routes remain unchanged. `reminders agent uninstall` reads the configured path
+from its LaunchAgent plist and removes that exact Serve route before removing
+the agent. To remove a route manually, or before reinstalling at a different
+path, remove only the old mount:
+
+```bash
+tailscale serve --https=443 --set-path=/reminders off
+```
+
 ### Connect an MCP client
 
 ```bash
 claude mcp add --transport http reminders \
   "http://<tailscale-ip>:7364/mcp" \
+  --header "Authorization: Bearer <token>"
+```
+
+With the optional Serve path, use HTTPS and include the mount prefix:
+
+```bash
+claude mcp add --transport http reminders \
+  "https://<tailscale-hostname>/reminders/mcp" \
   --header "Authorization: Bearer <token>"
 ```
 
@@ -248,13 +296,16 @@ Dates accept the CLI formats (`today`, `tomorrow`, `next week`, `2030-01-15`,
   listener binds only the tailscale interface. If you override `--bind`, keep
   the listener on a trusted network or provide TLS in front of it; never expose
   the plain HTTP port directly to an untrusted network.
+- `agent install --tailscale-serve-path` binds the plain HTTP listener to
+  loopback and lets Tailscale Serve terminate tailnet-only HTTPS. Bearer
+  authentication still applies to every MCP and REST request.
 - No Origin checking: DNS rebinding can let a hostile page reach the listener,
   but the page does not know the bearer token. Cross-origin Authorization
   headers also require a preflight that this server does not authorize, so the
   request never reaches a reminder route.
 - Request logs are one line each (method, path, status, duration); bodies and tokens are never logged.
 - launchd caveat: macOS ties Reminders access to the binary's path and
-  signature. Rebuilding or moving the binary can silently re-trigger the
+  signature. Updating the installed copy can silently re-trigger the
   permission prompt, which nobody sees under launchd; the server then fails
   until you run the binary by hand and re-grant access. `reminders agent
   status` shows the last exit state.

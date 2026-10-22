@@ -74,4 +74,21 @@ struct OpenAPIEndpointTests {
         let security = try #require(document["security"] as? [[String: Any]])
         #expect(security.first?["bearerAuth"] is [Any])
     }
+
+    @Test func endpointAdvertisesACustomExternalBasePath() async throws {
+        let (_, store) = makeTestStore()
+        let app = makeTestApp(store: store, externalBasePath: "/custom/reminders-mcp")
+
+        try await app.test(.router) { client in
+            try await client.execute(uri: "/openapi", method: .get) { response in
+                let document = try #require(
+                    JSONSerialization.jsonObject(
+                        with: Data(String(buffer: response.body).utf8)
+                    ) as? [String: Any]
+                )
+                let servers = try #require(document["servers"] as? [[String: Any]])
+                #expect(servers.first?["url"] as? String == "/custom/reminders-mcp")
+            }
+        }
+    }
 }

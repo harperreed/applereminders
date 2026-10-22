@@ -14,6 +14,7 @@ struct ServeCommandValidationTests {
         #expect(command.bind == nil)
         #expect(command.generateToken == false)
         #expect(command.tokenFile.hasSuffix(".config/reminders-mcp/token"))
+        #expect(command.externalBasePath == "/")
     }
 
     @Test func flagsOverrideDefaults() throws {
@@ -21,11 +22,13 @@ struct ServeCommandValidationTests {
             "--bind", "127.0.0.1",
             "--port", "8080",
             "--token-file", "/tmp/tok",
+            "--external-base-path", "/reminders",
             "--generate-token",
         ])
         #expect(command.bind == "127.0.0.1")
         #expect(command.port == 8080)
         #expect(command.tokenFile == "/tmp/tok")
+        #expect(command.externalBasePath == "/reminders")
         #expect(command.generateToken == true)
     }
 

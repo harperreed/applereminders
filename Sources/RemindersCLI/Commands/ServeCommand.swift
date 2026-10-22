@@ -6,7 +6,28 @@ import Foundation
 import RemindersCore
 import RemindersServer
 
+func validateExternalBasePath(_ path: String) throws {
+    let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+    guard path.hasPrefix("/"),
+          path != "/",
+          !path.hasSuffix("/"),
+          !path.contains("//"),
+          !path.contains("?"),
+          !path.contains("#"),
+          !path.contains(where: { $0.isWhitespace }),
+          !segments.contains("."),
+          !segments.contains("..")
+    else {
+        throw ValidationError(
+            "External base path must be a non-root path such as '/reminders', "
+                + "with no trailing slash, repeated slash, dot segment, query, fragment, or whitespace."
+        )
+    }
+}
+
 struct ServeCommand: AsyncParsableCommand {
+    static let defaultPort = 7364
+
     static let configuration = CommandConfiguration(
         commandName: "serve",
         abstract: "Run the network server (MCP over HTTP + REST API) on the tailscale interface."
@@ -16,10 +37,13 @@ struct ServeCommand: AsyncParsableCommand {
     var bind: String?
 
     @Option(name: .long, help: "Port to listen on.")
-    var port: Int = 7364
+    var port: Int = Self.defaultPort
 
     @Option(name: .long, help: "Path to the bearer token file.")
     var tokenFile: String = TokenFile.defaultPath
+
+    @Option(name: .long, help: "External URL path advertised by OpenAPI (default: /).")
+    var externalBasePath: String = "/"
 
     @Flag(name: .long, help: "Create the token file, print the token once, and exit. Refuses to overwrite.")
     var generateToken = false
@@ -27,6 +51,9 @@ struct ServeCommand: AsyncParsableCommand {
     func validate() throws {
         guard (1...65535).contains(port) else {
             throw ValidationError("Port must be between 1 and 65535.")
+        }
+        if externalBasePath != "/" {
+            try validateExternalBasePath(externalBasePath)
         }
     }
 
@@ -44,7 +71,12 @@ struct ServeCommand: AsyncParsableCommand {
         let store = RemindersStore()
         let app = buildApplication(
             store: store,
-            configuration: ServerConfiguration(host: host, port: port, token: token)
+            configuration: ServerConfiguration(
+                host: host,
+                port: port,
+                token: token,
+                externalBasePath: externalBasePath
+            )
         )
         FileHandle.standardError.write(
             Data("Serving on http://\(host):\(port) (MCP at /mcp, REST under /api)\n".utf8)

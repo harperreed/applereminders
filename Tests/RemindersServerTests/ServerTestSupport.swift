@@ -21,8 +21,18 @@ func makeTestStore() -> (backend: FakeEventStoreBackend, store: RemindersStore) 
 }
 
 /// Builds the app under test with request logging silenced.
-func makeTestApp(store: RemindersStore) -> some ApplicationProtocol {
-    Application(router: buildRouter(store: store, token: testToken, log: { _ in }))
+func makeTestApp(
+    store: RemindersStore,
+    externalBasePath: String = "/"
+) -> some ApplicationProtocol {
+    Application(
+        router: buildRouter(
+            store: store,
+            token: testToken,
+            externalBasePath: externalBasePath,
+            log: { _ in }
+        )
+    )
 }
 
 /// Decodes a JSON response body using the server's date convention.

@@ -40,7 +40,36 @@ struct LaunchAgentPlistTests {
         #expect(arguments.first == executablePath)
     }
 
+    @Test func customServeArgumentsAreWrittenToThePlist() throws {
+        let xml = LaunchAgent.plist(
+            executablePath: "/usr/local/bin/reminders",
+            serveArguments: [
+                "--bind", "127.0.0.1",
+                "--port", "7364",
+                "--external-base-path", "/custom/reminders-mcp",
+            ]
+        )
+        let object = try PropertyListSerialization.propertyList(
+            from: Data(xml.utf8),
+            format: nil
+        )
+        let dict = try #require(object as? [String: Any])
+        let arguments = try #require(dict["ProgramArguments"] as? [String])
+
+        #expect(arguments == [
+            "/usr/local/bin/reminders",
+            "serve",
+            "--bind",
+            "127.0.0.1",
+            "--port",
+            "7364",
+            "--external-base-path",
+            "/custom/reminders-mcp",
+        ])
+    }
+
     @Test func pathsLandInTheUserDomain() {
+        #expect(LaunchAgent.executablePath.hasSuffix("Library/Application Support/reminders-mcp/reminders"))
         #expect(LaunchAgent.plistPath.hasSuffix("Library/LaunchAgents/com.harperreed.reminders-mcp.plist"))
         #expect(LaunchAgent.logDirectory.hasSuffix("Library/Logs/reminders-mcp"))
     }

@@ -1,10 +1,12 @@
 // ABOUTME: Embedded OpenAPI 3.1 document for the REST network surface.
 // ABOUTME: Kept in the executable so binary-only installs can always serve it.
 
+import Foundation
 import Hummingbird
 import NIOCore
 
-let openAPISpecJSON = #"""
+private func openAPISpecJSONTemplate(encodedServerURL: String) -> String {
+    #"""
 {
   "openapi": "3.1.0",
   "info": {
@@ -12,7 +14,7 @@ let openAPISpecJSON = #"""
     "version": "1.0.0",
     "description": "Manage Apple Reminders over an authenticated Tailscale HTTP service."
   },
-  "servers": [{"url": "/"}],
+  "servers": [{"url": \#(encodedServerURL)}],
   "security": [{"bearerAuth": []}],
   "paths": {
     "/api/lists": {
@@ -249,11 +251,25 @@ let openAPISpecJSON = #"""
   }
 }
 """#
+}
 
-func openAPISpecResponse() -> Response {
+func renderOpenAPISpecJSON(serverURL: String = "/") -> String {
+    // A Swift String is always a valid JSON fragment, so serialization cannot fail.
+    let encodedURL = try! JSONSerialization.data(
+        withJSONObject: serverURL,
+        options: .fragmentsAllowed
+    )
+    return openAPISpecJSONTemplate(
+        encodedServerURL: String(decoding: encodedURL, as: UTF8.self)
+    )
+}
+
+let openAPISpecJSON = renderOpenAPISpecJSON()
+
+func openAPISpecResponse(json: String = openAPISpecJSON) -> Response {
     Response(
         status: .ok,
         headers: [.contentType: "application/json"],
-        body: .init(byteBuffer: ByteBuffer(string: openAPISpecJSON))
+        body: .init(byteBuffer: ByteBuffer(string: json))
     )
 }

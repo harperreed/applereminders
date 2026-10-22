@@ -11,11 +11,13 @@ public struct ServerConfiguration: Sendable {
     public let host: String
     public let port: Int
     public let token: String
+    public let externalBasePath: String
 
-    public init(host: String, port: Int, token: String) {
+    public init(host: String, port: Int, token: String, externalBasePath: String = "/") {
         self.host = host
         self.port = port
         self.token = token
+        self.externalBasePath = externalBasePath
     }
 }
 
@@ -63,14 +65,16 @@ func requiredID(from context: some RequestContext) throws -> String {
 func buildRouter(
     store: RemindersStore,
     token: String,
+    externalBasePath: String = "/",
     log: @escaping @Sendable (String) -> Void = defaultHTTPLog
 ) -> Router<BasicRequestContext> {
     let router = Router()
+    let openAPISpec = renderOpenAPISpecJSON(serverURL: externalBasePath)
     // Request logging is public so it covers /openapi and authenticated routes.
     router.middlewares.add(RequestLogMiddleware(log: log))
 
     router.get("openapi") { _, _ -> Response in
-        openAPISpecResponse()
+        openAPISpecResponse(json: openAPISpec)
     }
 
     // Hummingbird middleware applies only to routes registered after this call.
@@ -202,7 +206,11 @@ public func buildApplication(
     configuration: ServerConfiguration
 ) -> some ApplicationProtocol {
     Application(
-        router: buildRouter(store: store, token: configuration.token),
+        router: buildRouter(
+            store: store,
+            token: configuration.token,
+            externalBasePath: configuration.externalBasePath
+        ),
         configuration: ApplicationConfiguration(
             address: .hostname(configuration.host, port: configuration.port)
         )
