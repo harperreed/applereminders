@@ -16,7 +16,9 @@ jobs:
     name: Build and Release
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Build release binaries (one per arch)
         # Build each arch separately with SwiftPM's native build system. The
@@ -49,7 +51,7 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
@@ -59,10 +61,10 @@ jobs:
 
       - name: Update Homebrew tap
         env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${{ steps.tag.outputs.version }}"
-          TAG="${{ steps.tag.outputs.tag }}"
           SHA256=$(shasum -a 256 release/reminders-macos-universal.tar.gz | awk '{print $1}')
           URL="https://github.com/harperreed/applereminders/releases/download/${TAG}/reminders-macos-universal.tar.gz"
 
